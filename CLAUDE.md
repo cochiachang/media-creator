@@ -4,6 +4,7 @@
 
 - `upload/` — **輸入**參考圖片存放處。使用者將欲處理的圖片放在此處，腳本再從這裡讀取並送至 Gemini 或 OpenAI API 做進一步處理（例如風格轉換、顏色修改）。
 - `output/` — **輸出**目錄。所有 AI 生成或處理後的圖片一律儲存至此資料夾。
+- `skills/` — **知識庫**。存放參考文件、方法論、攻略等 Markdown 文件，供生圖腳本或提示詞撰寫時參考。
 
 ## 生圖規則
 
@@ -20,6 +21,7 @@ media-creator/
 ├── edit_logo_green.py   # OpenAI gpt-image-1 生圖／修圖
 ├── upload/              # 輸入參考圖片（送給 API 處理用）
 ├── output/              # AI 生成結果輸出目錄
+├── skills/              # 知識庫：方法論、攻略等參考文件
 └── CLAUDE.md
 ```
 
