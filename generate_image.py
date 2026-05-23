@@ -3,8 +3,10 @@ import sys
 from google import genai
 from google.genai import types
 
+OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 
-def generate_image(prompt: str, output_path: str = "output.png") -> str:
+
+def generate_image(prompt: str, output_filename: str = "output.png") -> str:
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise ValueError("GEMINI_API_KEY environment variable not set")
@@ -23,6 +25,9 @@ def generate_image(prompt: str, output_path: str = "output.png") -> str:
     if not response.generated_images:
         raise RuntimeError("No images were generated")
 
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    output_path = os.path.join(OUTPUT_DIR, output_filename)
+
     image_data = response.generated_images[0].image
     with open(output_path, "wb") as f:
         f.write(image_data.image_bytes)
@@ -35,8 +40,8 @@ if __name__ == "__main__":
         "A portrait of a beautiful young woman with elegant features, "
         "soft lighting, professional photography style, high quality"
     )
-    output = sys.argv[2] if len(sys.argv) > 2 else "output.png"
+    filename = sys.argv[2] if len(sys.argv) > 2 else "output.png"
 
     print(f"Generating image with prompt: {prompt}")
-    result = generate_image(prompt, output)
+    result = generate_image(prompt, filename)
     print(f"Image saved to: {result}")
