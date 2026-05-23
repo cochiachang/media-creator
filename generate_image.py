@@ -1,7 +1,17 @@
 import os
+import shutil
 import sys
 from google import genai
 from google.genai import types
+
+UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "upload")
+
+
+def save_to_upload(src_path: str) -> str:
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    dest = os.path.join(UPLOAD_DIR, os.path.basename(src_path))
+    shutil.copy2(src_path, dest)
+    return dest
 
 
 def generate_image(prompt: str, output_path: str = "output.png") -> str:
@@ -26,6 +36,9 @@ def generate_image(prompt: str, output_path: str = "output.png") -> str:
     image_data = response.generated_images[0].image
     with open(output_path, "wb") as f:
         f.write(image_data.image_bytes)
+
+    upload_path = save_to_upload(output_path)
+    print(f"Image uploaded to: {upload_path}")
 
     return output_path
 

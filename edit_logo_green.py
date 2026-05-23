@@ -1,8 +1,18 @@
 import os
+import shutil
 import base64
 from openai import OpenAI
 
+UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "upload")
+
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+
+
+def save_to_upload(src_path: str) -> str:
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    dest = os.path.join(UPLOAD_DIR, os.path.basename(src_path))
+    shutil.copy2(src_path, dest)
+    return dest
 
 prompt = (
     "A professional corporate logo for 'PAUL WRIGHT' consulting firm. "
@@ -31,3 +41,6 @@ with open(output_path, "wb") as f:
     f.write(image_bytes)
 
 print(f"Green logo saved to: {output_path}")
+
+upload_path = save_to_upload(output_path)
+print(f"Image uploaded to: {upload_path}")
