@@ -10,7 +10,7 @@
 
 ```bash
 brew install ffmpeg
-pip install openai httpx
+pip install openai httpx gdown
 ```
 
 設定 API 金鑰：
@@ -22,12 +22,22 @@ export SUNO_API_KEY=<your-sunoapi-key>   # 從 sunoapi.org 取得
 
 ### 2. 放入影片
 
+**方法 A：手動放入**
+
 將要處理的 `.mp4` 放入 `upload/` 資料夾：
 
 ```
 upload/
 └── your-video.mp4
 ```
+
+**方法 B：從 Google Drive 下載**
+
+```
+/run-gdrive-download
+```
+
+貼上 Google Drive 分享連結，系統自動下載並存入 `upload/`。
 
 ### 3. 一鍵執行
 
@@ -56,6 +66,10 @@ output-your-video/
 ## 完整流程
 
 ```
+Google Drive 連結（可選）
+    │
+    ▼  /run-gdrive-download   從 Google Drive 下載影片
+    │
 upload/<video>.mp4
     │
     ▼  /run-transcribe        字幕轉錄（Whisper）
@@ -82,6 +96,21 @@ upload/<video>.mp4
 ## 分開呼叫
 
 每個步驟都可以單獨執行，方便重跑某個環節或調整參數。
+
+### `/run-gdrive-download`
+
+從 Google Drive 分享連結下載影片，存入 `upload/`。
+
+- **Input**：Google Drive 分享連結或 File ID
+- **Output**：`upload/<filename>.<ext>`
+
+```
+/run-gdrive-download
+```
+
+> 支援 `/file/d/`、`?id=`、`uc?id=` 等所有常見 Google Drive 連結格式。檔案須設定為「知道連結的人皆可存取」。
+
+---
 
 ### `/run-transcribe`
 
@@ -172,6 +201,8 @@ upload/<video>.mp4
 | 問題 | 解法 |
 |---|---|
 | `ffmpeg: command not found` | `brew install ffmpeg` |
+| `ModuleNotFoundError: gdown` | `pip install gdown` |
+| Google Drive 下載失敗 | 確認分享設定為「知道連結的人皆可存取」 |
 | `OPENAI_API_KEY 未設定` | `export OPENAI_API_KEY=<key>` |
 | `SUNO_API_KEY 未設定` | `export SUNO_API_KEY=<key>`，金鑰至 sunoapi.org 取得 |
 | Suno credits 不足 | 至 sunoapi.org 帳號頁面儲值 |
