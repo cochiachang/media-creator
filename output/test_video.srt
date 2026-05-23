@@ -1,9 +1,0 @@
-1
-00:00:00,000 --> 00:00:03,320
-Welcome to the Cup of Excellence Costa Rica 2025.
-
-2
-00:00:03,320 --> 00:00:07,800
-Finca Los Pinos, position 7, score 88.13.
-
-
