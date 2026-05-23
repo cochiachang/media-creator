@@ -1,8 +1,4 @@
 {
   "mcpServers": {
-    "google-drive": {
-      "url": "https://drivemcp.googleapis.com/mcp/v1",
-      "type": "http"
-    }
   }
 }
