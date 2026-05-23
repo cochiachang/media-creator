@@ -27,8 +27,8 @@ python3 .claude/skills/run-final-mixer/driver.py
 
 | 軌道 | 預設音量 | 說明 |
 |---|---|---|
-| 原始聲音 | 100% | `ORIGINAL_VOLUME = 1.0` |
-| 背景音樂 | 15% | `BGM_VOLUME = 0.15` |
+| 原始聲音 | 100% | `ORIGINAL_VOLUME = 1.5` |
+| 背景音樂 | 10% | `BGM_VOLUME = 0.1` |
 
 若需調整，修改 driver.py 頂部的常數即可。
 

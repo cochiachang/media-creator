@@ -52,16 +52,16 @@ def find_font():
 
 def get_video_info(video_path):
     result = subprocess.run(
-        ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_streams", str(video_path)],
+        ["ffmpeg", "-i", str(video_path), "-hide_banner"],
         capture_output=True, text=True,
     )
-    data = json.loads(result.stdout)
+    import re as _re
     width, height, has_audio = 720, 1280, False
-    for stream in data.get("streams", []):
-        if stream.get("codec_type") == "video":
-            width = stream["width"]
-            height = stream["height"]
-        elif stream.get("codec_type") == "audio":
+    for line in result.stderr.splitlines():
+        m = _re.search(r"(\d{3,5})x(\d{3,5})", line)
+        if m and "Video" in line:
+            width, height = int(m.group(1)), int(m.group(2))
+        if "Audio" in line:
             has_audio = True
     return width, height, has_audio
 
@@ -284,14 +284,34 @@ def select_csv(csv_files):
 
 def find_source_video(csv_stem):
     base = csv_stem.replace("_viral_segments", "")
-    for ext in [".mp4", ".mov", ".mkv", ".avi", ".webm"]:
-        p = UPLOAD_DIR / (base + ext)
+    exts = [".mp4", ".mov", ".mkv", ".avi", ".webm"]
+
+    # 1. 優先使用 output/ 裡已有的同名影片
+    for ext in exts:
+        p = OUTPUT_DIR / (base + ext)
         if p.exists():
             return p
-    for ext in [".mp4", ".mov", ".mkv", ".avi", ".webm"]:
+
+    # 2. 從 upload/ 找同名影片，複製至 output/ 後使用
+    for ext in exts:
+        p = UPLOAD_DIR / (base + ext)
+        if p.exists():
+            dest = OUTPUT_DIR / p.name
+            print(f"output/ 中找不到 {p.name}，從 upload/ 複製至 output/…")
+            shutil.copy2(p, dest)
+            return dest
+
+    # 3. 萬用字元 fallback：upload/ 裡第一支影片，複製至 output/
+    for ext in exts:
         videos = list(UPLOAD_DIR.glob(f"*{ext}"))
         if videos:
-            return videos[0]
+            src = videos[0]
+            dest = OUTPUT_DIR / src.name
+            if not dest.exists():
+                print(f"output/ 中找不到對應影片，從 upload/{src.name} 複製至 output/…")
+                shutil.copy2(src, dest)
+            return dest
+
     return None
 
 
@@ -305,7 +325,7 @@ def main():
 
     source_video = find_source_video(csv_file.stem)
     if not source_video:
-        print("錯誤：找不到對應的原始影片（在 upload/ 中）")
+        print("錯誤：找不到對應的原始影片（output/ 和 upload/ 中均無影片）")
         sys.exit(1)
     print(f"原始影片：{source_video.name}")
 

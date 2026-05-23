@@ -13,7 +13,7 @@ description: 讀取 output/ 的 CSV 時間戳，用 ffmpeg 剪出短片段，並
 
 Driver：`.claude/skills/run-clip-cutter/driver.py`
 Font：`.claude/skills/run-clip-cutter/微軟正黑體.ttf`（已內建）
-Input：`output/*_viral_segments.csv` + `upload/<video>.*`
+Input：`output/*_viral_segments.csv` + `output/<video>.*`（若 output/ 無影片則自動從 upload/ 複製）
 Output：`output/clips/clip_<序號>_<起始時間>.mp4`
 
 ## Prerequisites
@@ -53,5 +53,5 @@ python3 .claude/skills/run-clip-cutter/driver.py
 | `ffmpeg: command not found` | `brew install ffmpeg` |
 | 中文字亂碼 / 方框 | 確認 `微軟正黑體.ttf` 在 skill 目錄；或 `fc-list :lang=zh-tw \| grep PingFang` |
 | `output/ 中沒有找到 *_viral_segments.csv` | 先執行 `/run-viral-analyzer` |
-| 找不到原始影片 | 確認 `upload/` 內有與 CSV 同名的影片檔 |
+| 找不到原始影片 | 確認 `output/` 或 `upload/` 內有與 CSV 同名的影片檔 |
 | `concat` 失敗（音訊流不符） | 檢查兩段影片的 sample rate 是否一致；driver 片頭固定用 44100 Hz |

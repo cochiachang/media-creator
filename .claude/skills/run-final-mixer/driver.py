@@ -13,9 +13,9 @@ CLIPS_DIR = PROJECT_ROOT / "output" / "clips"
 MUSIC_DIR = PROJECT_ROOT / "output" / "music"
 FINAL_DIR = PROJECT_ROOT / "output" / "final"
 
-# 原始聲音音量（1.0 = 100%），背景音樂音量（0.15 = 15%）
-ORIGINAL_VOLUME = 1.0
-BGM_VOLUME = 0.15
+# 原始聲音音量（1.0 = 100%），背景音樂音量（0.1 = 10%）
+ORIGINAL_VOLUME = 1.5
+BGM_VOLUME = 0.1
 
 
 def check_ffmpeg():
