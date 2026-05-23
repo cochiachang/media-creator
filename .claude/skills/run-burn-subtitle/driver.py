@@ -144,7 +144,7 @@ def main():
     print(f"使用字型：{font_name}")
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = OUTPUT_DIR / f"{video.stem}_subtitled.mp4"
+    out_path = OUTPUT_DIR / f"{video.stem}.mp4"
 
     print(f"\n開始燒錄字幕…")
     print(f"  影片：{video.name}")

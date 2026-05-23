@@ -5,12 +5,12 @@ description: 將 upload/ 的影片燒入 output/ 的 SRT 字幕，輸出含燒�
 
 # 字幕燒錄器
 
-讀取 `upload/` 的影片與 `output/` 的 `.srt` 字幕，用 ffmpeg `subtitles` filter 將字幕硬燒進影片，輸出至 `output/<影片名稱>_subtitled.mp4`。
+讀取 `upload/` 的影片與 `output/` 的 `.srt` 字幕，用 ffmpeg `subtitles` filter 將字幕硬燒進影片，輸出至 `output/<影片名稱>.mp4`。
 
 Driver：`.claude/skills/run-burn-subtitle/driver.py`
 Font：`.claude/skills/run-clip-cutter/微軟正黑體.ttf`（共用，已內建）
 Input：`upload/<video>.*` + `output/<video>.srt`
-Output：`output/<video>_subtitled.mp4`
+Output：`output/<video>.mp4`
 
 ## Prerequisites
 
