@@ -43,14 +43,56 @@ def extract_file_id(raw: str) -> str:
     sys.exit(f"Could not extract a Google Drive file ID from: {raw}")
 
 
+MAGIC_TO_EXT = {
+    b"\x00\x00\x00": ".mp4",   # ftyp box (checked below)
+    b"\x1a\x45\xdf\xa3": ".mkv",
+    b"\x52\x49\x46\x46": ".avi",
+    b"\x46\x4c\x56": ".flv",
+    b"\x00\x00\x01\xba": ".ts",
+    b"\x00\x00\x01\xb3": ".ts",
+}
+
+def _detect_ext(path: Path) -> str:
+    """Return file extension from magic bytes, or empty string if unknown."""
+    try:
+        with open(path, "rb") as f:
+            header = f.read(12)
+        # MP4/MOV/M4V share ISO Base Media ftyp box at offset 4
+        if header[4:8] in (b"ftyp", b"moov", b"mdat", b"free", b"skip"):
+            brand = header[8:12]
+            if brand.startswith(b"qt"):
+                return ".mov"
+            return ".mp4"
+        if header[:4] == b"\x1a\x45\xdf\xa3":
+            return ".mkv"
+        if header[:4] == b"RIFF" and header[8:12] == b"AVI ":
+            return ".avi"
+        if header[:3] == b"FLV":
+            return ".flv"
+        if header[:4] in (b"\x00\x00\x01\xba", b"\x00\x00\x01\xb3"):
+            return ".ts"
+        if header[:4] == b"\x1a\x45\xdf\xa3":
+            return ".webm"
+    except Exception:
+        pass
+    return ""
+
+
 def download(file_id: str, dest_dir: Path) -> Path:
-    url = f"https://drive.google.com/uc?id={file_id}"
     print(f"Downloading from Google Drive (id={file_id}) …")
     output = str(dest_dir / "gdrive_download")
-    result = gdown.download(url, output, quiet=False, fuzzy=True)
+    result = gdown.download(id=file_id, output=output, quiet=False)
     if result is None:
         sys.exit("Download failed. Check that the file is shared publicly (Anyone with the link).")
-    return Path(result)
+    downloaded = Path(result)
+    # If gdown didn't give us an extension, detect from magic bytes
+    if not downloaded.suffix:
+        ext = _detect_ext(downloaded)
+        if ext:
+            renamed = downloaded.with_name(downloaded.name + ext)
+            downloaded.rename(renamed)
+            downloaded = renamed
+    return downloaded
 
 
 def main():
