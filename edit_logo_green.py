@@ -1,18 +1,19 @@
 import os
-import shutil
 import base64
 from openai import OpenAI
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "upload")
+OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
 
-def save_to_upload(src_path: str) -> str:
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-    dest = os.path.join(UPLOAD_DIR, os.path.basename(src_path))
-    shutil.copy2(src_path, dest)
-    return dest
+def load_reference_image(filename: str) -> bytes:
+    """Read a reference image from the upload/ folder."""
+    path = os.path.join(UPLOAD_DIR, filename)
+    with open(path, "rb") as f:
+        return f.read()
+
 
 prompt = (
     "A professional corporate logo for 'PAUL WRIGHT' consulting firm. "
@@ -36,11 +37,9 @@ response = client.images.generate(
 image_b64 = response.data[0].b64_json
 image_bytes = base64.b64decode(image_b64)
 
-output_path = "output_green.png"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+output_path = os.path.join(OUTPUT_DIR, "output_green.png")
 with open(output_path, "wb") as f:
     f.write(image_bytes)
 
 print(f"Green logo saved to: {output_path}")
-
-upload_path = save_to_upload(output_path)
-print(f"Image uploaded to: {upload_path}")
