@@ -197,7 +197,6 @@ def correct_srt_with_llm(srt_text: str, background: str) -> str:
                 ),
             },
         ],
-        temperature=0,
     )
 
     corrected = response.choices[0].message.content.strip()
