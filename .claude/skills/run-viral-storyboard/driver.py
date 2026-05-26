@@ -2,7 +2,7 @@
 """
 短影音分鏡設計師
 呼叫 GPT-5.5（gpt-5.5-2026-04-23）根據爆紅 CSV、SRT、方法論，
-設計 30-60 秒短影音完整分鏡腳本，含前3秒勾子、截圖、DALL-E 封面、JSON 輸出。
+設計 30-60 秒短影音完整分鏡腳本，含前3秒勾子、截圖、JSON 輸出。
 """
 import csv
 import json
@@ -10,7 +10,6 @@ import os
 import re
 import sys
 import subprocess
-import urllib.request
 from pathlib import Path
 from datetime import datetime
 
@@ -100,25 +99,6 @@ def extract_single_shot(video: Path, time_str: str, filename: str) -> str | None
     if result.returncode == 0 and out.exists():
         return str(out.relative_to(PROJECT_ROOT))
     return None
-
-
-def generate_cover(client: OpenAI, dalle_prompt: str) -> str | None:
-    """呼叫 DALL-E 3 生成封面，回傳相對路徑"""
-    try:
-        response = client.images.generate(
-            model="dall-e-3",
-            prompt=dalle_prompt,
-            size="1024x1792",   # 9:16 直式，適合手機短影音封面
-            quality="standard",
-            n=1,
-        )
-        url = response.data[0].url
-        cover_path = OUTPUT_DIR / "storyboard_cover.png"
-        urllib.request.urlretrieve(url, str(cover_path))
-        return str(cover_path.relative_to(PROJECT_ROOT))
-    except Exception as e:
-        print(f"  ⚠️  封面生成失敗：{e}")
-        return None
 
 
 def extract_json(text: str) -> dict:
@@ -261,7 +241,6 @@ def design_storyboard(
    每個場景附：視覺描述、字幕提詞、轉場方式（cut/fade/zoom/slide）。
    ⚠️ `storyboard` 陣列**絕對不可以**出現 `"label": "cta"` 的場景，CTA 只放在 `cta_scene`。
 3. **片尾 CTA**：只填在 `cta_scene` 欄位，設計引導使用者完成指定行動的畫面與語音。不要在 `storyboard` 裡重複放 CTA。
-4. **封面**：提供一段英文 DALL-E 3 prompt，生成適合 9:16 直式手機封面的視覺構圖（無需文字）。
 
 ⚠️ 時間戳規則（重要）：
 - **不要自己填寫任何時間戳字串**
@@ -281,10 +260,6 @@ def design_storyboard(
 {{
   "total_duration_seconds": <整數>,
   "narrative_strategy": "<整體敘事策略，100字以內>",
-  "cover": {{
-    "dalle_prompt": "<英文 DALL-E 3 prompt，描述視覺構圖，不要加文字>",
-    "description": "<封面設計說明，中文>"
-  }},
   "hook": {{
     "source_segment": "<CSV 片段編號>",
     "srt_start": <字幕序號整數>,
@@ -421,18 +396,7 @@ def main():
     elif actual_total > 60:
         print(f"   ⚠️  總時長 {actual_total}s 超過 60s（目標 30-60s），建議縮短各場景的 srt 範圍")
 
-    # 6. 生成 DALL-E 封面
-    print("\n🎨 呼叫 DALL-E 3 生成封面圖片…")
-    dalle_prompt = storyboard.get("cover", {}).get("dalle_prompt", "")
-    cover_file: str | None = None
-    if dalle_prompt:
-        cover_file = generate_cover(client, dalle_prompt)
-        if cover_file:
-            print(f"   ✓ 封面已儲存：{cover_file}")
-    else:
-        print("   ⚠️  GPT 未提供 DALL-E prompt，跳過封面生成")
-
-    # 7. 對各分鏡節點提取代表截圖
+    # 6. 對各分鏡節點提取代表截圖
     scene_shots: dict[int, str] = {}
     if video_file:
         print("\n📸 提取各分鏡代表截圖…")
@@ -445,7 +409,7 @@ def main():
                     scene_shots[n] = shot
                     print(f"   場景 {n:02d} ✓")
 
-    # 8. 組合最終 JSON
+    # 7. 組合最終 JSON
     stem = csv_file.stem.replace("_viral_segments", "")
     out_path = OUTPUT_DIR / f"{stem}_storyboard.json"
 
@@ -458,11 +422,6 @@ def main():
             "cta":                    cta,
             "total_duration_seconds": storyboard.get("total_duration_seconds", 0),
             "narrative_strategy":     storyboard.get("narrative_strategy", ""),
-        },
-        "cover": {
-            "file":         cover_file,
-            "dalle_prompt": dalle_prompt,
-            "description":  storyboard.get("cover", {}).get("description", ""),
         },
         "hook": {
             **storyboard.get("hook", {}),
@@ -485,8 +444,6 @@ def main():
     print(f"\n✅ 分鏡腳本已儲存：output/{out_path.name}")
     print(f"   場景總數：{len(final['storyboard'])} 個分鏡")
     print(f"   預計時長：{final['meta']['total_duration_seconds']} 秒")
-    if cover_file:
-        print(f"   封面圖片：{cover_file}")
     if hook_screenshots:
         print(f"   勾子截圖：{len(hook_screenshots)} 張（逐秒）")
 
