@@ -2,8 +2,15 @@
 .env
 output/
 
-# 媒體產出（大型二進位檔，不進 git）
-output-*/
+# 中間產物與暫存（不進 git）
+output-*/clips/
+output-*/storyboard_screenshots/
+output-*/cta_scene_frames/
+output-*/merged.mp4
+output-*/veo3_hook_*.mp4
+output-*/veo3_hook_*.mp3
+output-*/cta_scene_tts.mp3
+output-*/music/
 upload/*.mp4
 upload/*.mov
 upload/concat_list.txt
