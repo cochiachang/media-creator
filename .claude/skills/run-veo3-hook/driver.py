@@ -215,11 +215,16 @@ def generate_veo3_video(client: genai.Client, prompt: str, ref_image: Path) -> P
 
 # ── Step 4：ffmpeg 燒入繁體中文字幕 ──────────────────────────────────────────
 def burn_subtitle(src: Path, subtitle: str, out_path: Path) -> bool:
+    _bundled = Path(__file__).resolve().parents[2] / "微軟正黑體.ttf"
     font_candidates = [
-        "/System/Library/Fonts/STHeiti Medium.ttc",
-        "/System/Library/Fonts/PingFang.ttc",
-        "/System/Library/Fonts/Supplemental/Arial Unicode MS.ttf",
-        "/Library/Fonts/Arial Unicode MS.ttf",
+        str(_bundled),                                                   # 專案內建（跨平台首選）
+        "/System/Library/Fonts/STHeiti Medium.ttc",                      # macOS
+        "/System/Library/Fonts/PingFang.ttc",                            # macOS
+        "/System/Library/Fonts/Supplemental/Arial Unicode MS.ttf",       # macOS
+        "/Library/Fonts/Arial Unicode MS.ttf",                           # macOS
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",        # Linux Noto
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",        # Linux Noto (alt)
+        "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",                  # Linux WQY
     ]
     font = next((f for f in font_candidates if Path(f).exists()), None)
     if not font:

@@ -36,14 +36,18 @@ TTS_VOICE     = "nova"
 TTS_SPEED     = 1.25
 CLIP_DURATION = 5
 
-# 字體候選（優先 PingFang，確保中文顯示）
+# 字體候選（優先使用專案內建微軟正黑體，確保跨平台中文顯示）
+_BUNDLED_FONT = Path(__file__).resolve().parents[2] / "微軟正黑體.ttf"
 FONT_CANDIDATES = [
-    "/System/Library/Fonts/PingFang.ttc",
-    "/System/Library/Fonts/STHeiti Medium.ttc",
-    "/System/Library/Fonts/STHeiti Light.ttc",
-    "/System/Library/Fonts/Supplemental/Arial Unicode MS.ttf",
-    "/Library/Fonts/Arial Unicode MS.ttf",
-    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    str(_BUNDLED_FONT),                                              # 專案內建（跨平台首選）
+    "/System/Library/Fonts/PingFang.ttc",                           # macOS
+    "/System/Library/Fonts/STHeiti Medium.ttc",                     # macOS
+    "/System/Library/Fonts/STHeiti Light.ttc",                      # macOS
+    "/System/Library/Fonts/Supplemental/Arial Unicode MS.ttf",      # macOS
+    "/Library/Fonts/Arial Unicode MS.ttf",                          # macOS
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",       # Linux Noto
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",       # Linux Noto (alt)
+    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",                 # Linux WQY
 ]
 
 
