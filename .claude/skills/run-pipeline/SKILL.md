@@ -17,7 +17,7 @@ description: 一鍵執行完整短影音製作流水線：依序呼叫 run-trans
    1. `/run-transcribe` — 轉錄字幕（產生 SRT）
    2. `/run-viral-analyzer` — 分析爆紅片段，傳入 N 與背景資訊，跳過 skill 內的互動詢問
    3. `/run-viral-storyboard` — 設計分鏡腳本，傳入背景資訊，跳過 skill 內的互動詢問
-   4. `/run-veo3-hook`  — 生成 VEO3 分鏡腳本（可選，視 run-viral-storyboard 結果而定）
+   4. `/run-veo3-hook`  — 生成 VEO3 分鏡腳本
    5. `/run-cta-scene` — 生成 CTA 片尾（可選，視需求而定），這邊應該帶入使用者輸入的ＣＴＡ
    6. `/run-clip-cutter` — 剪輯精華片段（降噪＋字幕燒錄，輸出至 output/clips/，不含片頭）
    7. `/run-fb-post-generator` — 生成 Facebook 貼文

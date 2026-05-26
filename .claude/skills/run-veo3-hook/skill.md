@@ -1,3 +1,8 @@
+---
+name: run-veo3-hook
+description: 讀取 output/*_storyboard.json 的 hook 區塊與截圖，呼叫 Google Veo3（veo-3.0-generate-preview）以 image-to-video 模式生成前3秒勾子短片。自動選取中間參考幀、組合英文 prompt、生成 3 個版本供選擇，輸出 output/veo3_hook_final.mp4。Veo3, hook, 勾子, video generation, image-to-video, 短影音, 前3秒, 生成影片
+---
+
 # run-veo3-hook
 
 讀取 `output/*_storyboard.json` 的 hook 區塊與截圖，呼叫 **Google Veo3**（`veo-3.0-generate-preview`）以 image-to-video 模式生成前3秒勾子短片。自動選取中間參考幀、組合英文 prompt、生成 3 個版本供選擇，輸出 `output/veo3_hook_final.mp4`。
