@@ -346,9 +346,9 @@ def main():
     # 2. 詢問 CTA
     print("\n請輸入片尾 CTA（例如：追蹤帳號 @hwccoffee / 點擊連結訂閱 / 留言告訴我你的想法）")
     try:
-        cta = input("CTA > ").strip() or "追蹤我們獲取更多精品咖啡好內容"
+        cta = input("CTA > ").strip() or "追蹤我們獲取更多精彩內容"
     except EOFError:
-        cta = "追蹤我們獲取更多精品咖啡好內容"
+        cta = "追蹤我們獲取更多精彩內容"
 
     # 3. 讀取內容
     print("\n📖 讀取分析資料…")
