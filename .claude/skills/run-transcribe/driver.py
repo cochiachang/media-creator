@@ -165,27 +165,28 @@ def merge_duplicate_srt(srt_text: str) -> str:
 
 def correct_srt_with_llm(srt_text: str, background: str) -> str:
     """
-    Use GPT-4o to fix homophones and segmentation errors in the SRT,
-    preserving all timestamps exactly.
+    Use GPT-5.5 to fix homophones and segmentation errors in the SRT,
+    preserving all timestamps exactly. Also translates English text to Chinese.
     """
-    print("使用 GPT-4o 校正同音字與斷句錯誤…")
+    print("使用 GPT-5.5 校正同音字與斷句錯誤（含英文翻中文）…")
 
     background_section = f"影片背景：{background}\n\n" if background else ""
 
     response = client.chat.completions.create(
-        model="gpt-4o",
+        model="gpt-5.5-2026-04-23",
         messages=[
             {
                 "role": "system",
                 "content": (
-                    "你是專業的繁體中文字幕校稿員，專門修正語音轉錄（Whisper）產生的同音字錯誤。\n\n"
+                    "你是專業的繁體中文字幕校稿員，專門修正語音轉錄（Whisper）產生的同音字錯誤，並將英文字幕翻譯為繁體中文。\n\n"
                     "規則：\n"
                     "1. 根據上下文語意修正同音字或音近字錯誤，例如「質地」→「之一」、「已經」→「一定」等\n"
-                    "2. SRT 時間戳（如 00:00:28,600 --> 00:00:30,900）完全不可修改\n"
-                    "3. 字幕編號不可修改\n"
-                    "4. 只修改文字內容，不合併或拆分字幕段落\n"
-                    "5. 若原文正確或不確定，保留原文不動\n"
-                    "6. 直接輸出修正後的完整 SRT 內容，不加任何說明或 markdown"
+                    "2. 若字幕內容為英文（或混有英文句子），將英文部分翻譯為自然流暢的繁體中文\n"
+                    "3. SRT 時間戳（如 00:00:28,600 --> 00:00:30,900）完全不可修改\n"
+                    "4. 字幕編號不可修改\n"
+                    "5. 只修改文字內容，不合併或拆分字幕段落\n"
+                    "6. 若原文正確或不確定，保留原文不動\n"
+                    "7. 直接輸出修正後的完整 SRT 內容，不加任何說明或 markdown"
                 ),
             },
             {
@@ -196,7 +197,6 @@ def correct_srt_with_llm(srt_text: str, background: str) -> str:
                 ),
             },
         ],
-        temperature=0,
     )
 
     corrected = response.choices[0].message.content.strip()
@@ -327,7 +327,7 @@ def main():
     else:
         output_srt = OUTPUT_DIR / (input_path.stem + ".srt")
 
-    transcribe(input_path, output_srt, background="", do_correct=False)
+    transcribe(input_path, output_srt, background=args.background, do_correct=not args.no_correct)
 
     # 轉錄成功後刪除原始分段檔案
     if originals_to_delete:
