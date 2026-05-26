@@ -117,6 +117,52 @@ def fill_srt_gaps(srt_text: str) -> str:
     return "\n".join(lines)
 
 
+def merge_duplicate_srt(srt_text: str) -> str:
+    """
+    合併連續重複的字幕段落：
+    若相鄰兩段（或多段）的字幕文字完全相同，保留第一段的開始時間、
+    最後一段的結束時間，其餘段落移除，並重新編號。
+    """
+    import re
+
+    SEG_RE = re.compile(
+        r"(\d+)\s*\n"                                          # 編號
+        r"(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})\s*\n"  # 時間戳
+        r"(.*?)"                                               # 字幕文字（可多行）
+        r"(?=\n\s*\n|\Z)",                                     # 以空白行或字串尾結束
+        re.DOTALL,
+    )
+
+    segments = [
+        {"start": m.group(2), "end": m.group(3), "text": m.group(4).strip()}
+        for m in SEG_RE.finditer(srt_text)
+    ]
+
+    if not segments:
+        return srt_text
+
+    merged: list[dict] = []
+    cur = segments[0].copy()
+
+    for seg in segments[1:]:
+        if seg["text"] == cur["text"]:
+            # 相同文字 → 延長結束時間
+            cur["end"] = seg["end"]
+        else:
+            merged.append(cur)
+            cur = seg.copy()
+    merged.append(cur)
+
+    removed = len(segments) - len(merged)
+    if removed:
+        print(f"合併連續重複字幕：移除 {removed} 段（剩餘 {len(merged)} 段）")
+
+    lines = []
+    for i, seg in enumerate(merged, 1):
+        lines.append(f"{i}\n{seg['start']} --> {seg['end']}\n{seg['text']}\n")
+    return "\n".join(lines)
+
+
 def correct_srt_with_llm(srt_text: str, background: str) -> str:
     """
     Use GPT-4o to fix homophones and segmentation errors in the SRT,
@@ -212,6 +258,9 @@ def transcribe(input_path: Path, output_srt: Path, background: str, do_correct: 
     # Step A2: fill gaps — extend each segment end to the next segment start
     srt_text = fill_srt_gaps(srt_text)
 
+    # Step A3: merge consecutive duplicate subtitles
+    srt_text = merge_duplicate_srt(srt_text)
+
     # Step B: GPT-4o correction
     if do_correct:
         srt_text = correct_srt_with_llm(srt_text, background)
@@ -236,37 +285,38 @@ def main():
         sys.exit("❌ 請先設定 OPENAI_API_KEY：export OPENAI_API_KEY=<your-key>")
     client = OpenAI(api_key=api_key)
 
-    # We may create a temporary directory to hold a merged video; keep it alive
-    # until transcription finishes, then clean up.
-    merge_tmp = None
-
     # Resolve input file
+    originals_to_delete: list[Path] = []   # original segment files to delete after success
+
     if not args.input_file:
         # Auto-pick from upload/; merge automatically when multiple files exist
-        candidates = sorted(UPLOAD_DIR.glob("*"))
-        candidates = [f for f in candidates if f.suffix.lower() in AUDIO_EXTS | VIDEO_EXTS]
+        # Sort by filename (alphabetical) to ensure correct segment order
+        candidates = sorted(
+            [f for f in UPLOAD_DIR.glob("*") if f.suffix.lower() in AUDIO_EXTS | VIDEO_EXTS],
+            key=lambda p: p.name,
+        )
         if not candidates:
             sys.exit(f"找不到 upload/ 內的影片或音訊檔案。")
         if len(candidates) == 1:
             input_path = candidates[0]
             print(f"自動選取：{input_path.name}")
         else:
-            # Multiple files → merge into one, then transcribe the merged file
-            print(f"找到 {len(candidates)} 個影片，依檔名順序合併為一支再轉錄：")
+            # Multiple files → merge into upload/merged.mp4, then transcribe
+            print(f"找到 {len(candidates)} 個影片，依檔名順序合併為 merged.mp4：")
             for f in candidates:
                 print(f"  - {f.name}")
-            merge_tmp = tempfile.TemporaryDirectory()
             print("合併中（ffmpeg concat）…")
             try:
-                input_path = merge_videos(candidates, Path(merge_tmp.name))
+                input_path = merge_videos(candidates, UPLOAD_DIR)
             except subprocess.CalledProcessError as e:
-                merge_tmp.cleanup()
                 sys.exit(f"❌ ffmpeg 合併失敗：{e.stderr.decode(errors='replace')}")
             print(f"✅ 合併完成：{input_path.name}（{input_path.stat().st_size // 1024 // 1024} MB）")
+            # 記錄原始檔案，轉錄成功後刪除
+            originals_to_delete = [f for f in candidates if f != input_path]
     else:
         input_path = Path(args.input_file)
         if not input_path.is_absolute():
-            input_path = UPLOAD_DIR / input_path
+            input_path = UPLOAD_DIR / args.input_file
 
     if not input_path.exists():
         sys.exit(f"找不到檔案：{input_path}")
@@ -275,7 +325,7 @@ def main():
     if args.output_srt:
         output_srt = Path(args.output_srt)
         if not output_srt.is_absolute():
-            output_srt = OUTPUT_DIR / output_srt
+            output_srt = OUTPUT_DIR / args.output_srt
     else:
         output_srt = OUTPUT_DIR / (input_path.stem + ".srt")
 
@@ -285,11 +335,15 @@ def main():
         print("\n💡 提供影片背景資訊可提升同音字辨識準確度（可直接按 Enter 跳過）")
         background = input("影片背景（主角、主題、品牌、專有名詞等）：").strip()
 
-    try:
-        transcribe(input_path, output_srt, background, do_correct=not args.no_correct)
-    finally:
-        if merge_tmp:
-            merge_tmp.cleanup()
+    transcribe(input_path, output_srt, background, do_correct=not args.no_correct)
+
+    # 轉錄成功後刪除原始分段檔案
+    if originals_to_delete:
+        print(f"🗑️  刪除原始分段檔案（共 {len(originals_to_delete)} 個）…")
+        for f in originals_to_delete:
+            f.unlink()
+            print(f"   刪除：{f.name}")
+        print("✅ 原始檔案已清除，upload/ 僅保留 merged.mp4")
 
 
 if __name__ == "__main__":
