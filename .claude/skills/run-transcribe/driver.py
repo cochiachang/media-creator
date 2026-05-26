@@ -28,6 +28,29 @@ MAX_BYTES   = 25 * 1024 * 1024   # Whisper hard limit
 client: OpenAI = None  # initialised in main() after arg parsing
 
 
+def merge_videos(video_paths: list[Path], dest_dir: Path) -> Path:
+    """Merge multiple video files into a single MP4 using ffmpeg concat demuxer.
+
+    Files are merged in the order given (caller should sort them first).
+    Returns the path to the merged MP4 inside dest_dir.
+    """
+    out = dest_dir / "merged.mp4"
+    list_file = dest_dir / "concat_list.txt"
+
+    with open(list_file, "w", encoding="utf-8") as f:
+        for p in video_paths:
+            # ffmpeg concat list uses forward slashes and requires the path
+            # to be quoted with single quotes when it contains spaces.
+            f.write(f"file '{p}'\n")
+
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "concat", "-safe", "0",
+         "-i", str(list_file), "-c", "copy", str(out)],
+        check=True, capture_output=True,
+    )
+    return out
+
+
 def extract_audio(video_path: Path, dest: Path) -> Path:
     """Extract mono 16-kHz MP3 from a video — small enough for the API."""
     out = dest / (video_path.stem + "_audio.mp3")
@@ -131,10 +154,28 @@ def correct_srt_with_llm(srt_text: str, background: str) -> str:
     )
 
     corrected = response.choices[0].message.content.strip()
-    # Safety: if the response is clearly malformed (e.g., much shorter than original), keep original
+
+    # Safety checks: validate the corrected SRT looks like real subtitles
+    import re
+    original_ts_count = len(re.findall(r"\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}", srt_text))
+    corrected_ts_count = len(re.findall(r"\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}", corrected))
+
+    # Check 1: corrected must not be much shorter
     if len(corrected) < len(srt_text) * 0.5:
-        print("⚠️  GPT-4o 回傳內容異常，保留 Whisper 原始輸出。")
+        print("⚠️  GPT-4o 回傳內容過短，保留 Whisper 原始輸出。")
         return srt_text
+
+    # Check 2: corrected must have at least 80% of the original timestamp count
+    if original_ts_count > 0 and corrected_ts_count < original_ts_count * 0.8:
+        print(f"⚠️  GPT-4o 時間戳數量不符（原始 {original_ts_count} 段，校正後 {corrected_ts_count} 段），保留 Whisper 原始輸出。")
+        return srt_text
+
+    # Check 3: detect if GPT replaced content with background text (repetitive lines)
+    lines = [l.strip() for l in corrected.splitlines() if l.strip() and not re.match(r"^\d+$", l) and "-->" not in l]
+    if lines and len(set(lines)) == 1:
+        print("⚠️  GPT-4o 回傳內容全部相同（疑似以背景資訊覆寫字幕），保留 Whisper 原始輸出。")
+        return srt_text
+
     return corrected
 
 
@@ -195,9 +236,13 @@ def main():
         sys.exit("❌ 請先設定 OPENAI_API_KEY：export OPENAI_API_KEY=<your-key>")
     client = OpenAI(api_key=api_key)
 
+    # We may create a temporary directory to hold a merged video; keep it alive
+    # until transcription finishes, then clean up.
+    merge_tmp = None
+
     # Resolve input file
     if not args.input_file:
-        # Auto-pick if only one file in upload/
+        # Auto-pick from upload/; merge automatically when multiple files exist
         candidates = sorted(UPLOAD_DIR.glob("*"))
         candidates = [f for f in candidates if f.suffix.lower() in AUDIO_EXTS | VIDEO_EXTS]
         if not candidates:
@@ -206,14 +251,18 @@ def main():
             input_path = candidates[0]
             print(f"自動選取：{input_path.name}")
         else:
-            print("找到多個檔案，請選擇：")
-            for i, f in enumerate(candidates, 1):
-                print(f"  {i}. {f.name}")
-            choice = input("請輸入編號：").strip()
+            # Multiple files → merge into one, then transcribe the merged file
+            print(f"找到 {len(candidates)} 個影片，依檔名順序合併為一支再轉錄：")
+            for f in candidates:
+                print(f"  - {f.name}")
+            merge_tmp = tempfile.TemporaryDirectory()
+            print("合併中（ffmpeg concat）…")
             try:
-                input_path = candidates[int(choice) - 1]
-            except (ValueError, IndexError):
-                sys.exit("無效的選擇。")
+                input_path = merge_videos(candidates, Path(merge_tmp.name))
+            except subprocess.CalledProcessError as e:
+                merge_tmp.cleanup()
+                sys.exit(f"❌ ffmpeg 合併失敗：{e.stderr.decode(errors='replace')}")
+            print(f"✅ 合併完成：{input_path.name}（{input_path.stat().st_size // 1024 // 1024} MB）")
     else:
         input_path = Path(args.input_file)
         if not input_path.is_absolute():
@@ -236,7 +285,11 @@ def main():
         print("\n💡 提供影片背景資訊可提升同音字辨識準確度（可直接按 Enter 跳過）")
         background = input("影片背景（主角、主題、品牌、專有名詞等）：").strip()
 
-    transcribe(input_path, output_srt, background, do_correct=not args.no_correct)
+    try:
+        transcribe(input_path, output_srt, background, do_correct=not args.no_correct)
+    finally:
+        if merge_tmp:
+            merge_tmp.cleanup()
 
 
 if __name__ == "__main__":

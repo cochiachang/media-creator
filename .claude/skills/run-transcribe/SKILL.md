@@ -19,12 +19,34 @@ pip install openai
 export OPENAI_API_KEY=<your-key>
 ```
 
+## 多影片自動合併
+
+`upload/` 內若有 **多支影片**，driver 會先用 `ffmpeg concat` 依檔名順序將它們合併成一支，再送 Whisper 轉錄，輸出為 `output/merged.srt`。
+
+```
+找到 3 個影片，依檔名順序合併為一支再轉錄：
+  - part1.mp4
+  - part2.mp4
+  - part3.mp4
+合併中（ffmpeg concat）…
+✅ 合併完成：merged.mp4（180 MB）
+從影片萃取音訊：merged.mp4
+送交 Whisper API（language=zh）：merged_audio.mp3
+使用 GPT-4o 校正同音字與斷句錯誤…
+✅ SRT 已儲存：/…/output/merged.srt
+```
+
+> 若要手動指定合併順序，請直接傳入單一已合併的檔案路徑。
+
 ## Run (agent path)
 
-Place the source file in `upload/`, then:
+Place the source file(s) in `upload/`, then:
 
 ```bash
-# 基本用法（會互動詢問影片背景）
+# 基本用法（upload/ 只有一支影片，或自動合併多支）
+python3 .claude/skills/run-transcribe/driver.py
+
+# 指定單一檔案（跳過自動選取 / 合併）
 python3 .claude/skills/run-transcribe/driver.py test_video.mp4
 
 # 指定背景資訊（跳過互動詢問）

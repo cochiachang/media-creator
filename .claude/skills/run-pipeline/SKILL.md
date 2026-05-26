@@ -12,12 +12,13 @@ description: 一鍵執行完整短影音製作流水線：依序呼叫 run-trans
 1. 確認 `upload/` 內有 `.mp4` 檔案，記下檔名（後面封存資料夾用）
 2. 詢問使用者以下兩個問題（一次問完）：
    - **影片背景資訊**（主題、主角身份、品牌等）
+   - **ＣＴＡ 目標**（希望觀眾完成的行動，例如「追蹤粉專」、「購買產品」、「留言 tag 朋友」等）
 3. 依序呼叫以下技能，每個步驟完成後再進行下一步：
    1. `/run-transcribe` — 轉錄字幕（產生 SRT）
    2. `/run-viral-analyzer` — 分析爆紅片段，傳入 N 與背景資訊，跳過 skill 內的互動詢問
    3. `/run-viral-storyboard` — 設計分鏡腳本，傳入背景資訊，跳過 skill 內的互動詢問
    4. `/run-veo3-hook`  — 生成 VEO3 分鏡腳本（可選，視 run-viral-storyboard 結果而定）
-   5. `/run-cta-scene` — 生成 CTA 片尾（可選，視需求而定）
+   5. `/run-cta-scene` — 生成 CTA 片尾（可選，視需求而定），這邊應該帶入使用者輸入的ＣＴＡ
    6. `/run-clip-cutter` — 剪輯精華片段（降噪＋字幕燒錄，輸出至 output/clips/，不含片頭）
    7. `/run-fb-post-generator` — 生成 Facebook 貼文
    8. `/run-music-generator` — 生成背景音樂
