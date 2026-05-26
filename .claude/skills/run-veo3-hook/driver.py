@@ -40,11 +40,125 @@ except ImportError:
 # ── 設定 ──────────────────────────────────────────────────────────────────────
 PROJECT_ROOT       = Path(__file__).resolve().parents[3]
 OUTPUT_DIR         = PROJECT_ROOT / "output"
+UPLOAD_DIR         = PROJECT_ROOT / "upload"
 SHOTS_DIR          = OUTPUT_DIR / "storyboard_screenshots"
 VEO_MODEL          = "veo-3.0-generate-001"
 VEO_FALLBACK_MODEL = "veo-3.0-fast-generate-001"
 GPT_MODEL          = "gpt-4o"
 POLL_INTERVAL      = 20
+
+# Veo3 支援的 aspect ratio 列表（寬:高）
+VEO_SUPPORTED_RATIOS = {
+    "9:16":  9 / 16,   # 垂直（手機豎屏）
+    "16:9":  16 / 9,   # 橫向（YouTube）
+    "1:1":   1 / 1,    # 正方形
+    "4:3":   4 / 3,    # 傳統電視
+    "3:4":   3 / 4,    # 垂直（傳統）
+}
+
+
+def detect_source_video_info() -> dict:
+    """
+    偵測 upload/ 內原始影片的寬、高、fps、sample_rate、channels，
+    並自動對應到最接近的 Veo3 aspect_ratio。
+    回傳 dict: {aspect_ratio, width, height, fps, sample_rate, channels}
+    找不到影片時回傳 16:9 預設值。
+    """
+    default = dict(aspect_ratio="16:9", width=854, height=480, fps=30, sample_rate=44100, channels=2)
+    videos = sorted(UPLOAD_DIR.glob("*.mp4")) + sorted(UPLOAD_DIR.glob("*.mov"))
+    if not videos:
+        print("  ⚠️  upload/ 找不到影片，使用預設 16:9 / 854×480 / 30fps")
+        return default
+
+    video = videos[0]
+
+    # 取得視訊資訊
+    v_result = subprocess.run(
+        ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
+         "-show_entries", "stream=width,height,r_frame_rate",
+         "-of", "csv=p=0", str(video)],
+        capture_output=True, text=True,
+    )
+    # 取得音訊資訊
+    a_result = subprocess.run(
+        ["ffprobe", "-v", "quiet", "-select_streams", "a:0",
+         "-show_entries", "stream=sample_rate,channels",
+         "-of", "csv=p=0", str(video)],
+        capture_output=True, text=True,
+    )
+
+    try:
+        v_parts = v_result.stdout.strip().split(",")
+        w, h = int(v_parts[0]), int(v_parts[1])
+        fps_raw = v_parts[2]  # e.g. "30/1" or "2997/100"
+        num, den = map(int, fps_raw.split("/"))
+        fps = round(num / den)
+    except Exception:
+        print(f"  ⚠️  視訊資訊解析失敗，使用預設值")
+        w, h, fps = default["width"], default["height"], default["fps"]
+
+    try:
+        a_parts = a_result.stdout.strip().split(",")
+        sample_rate = int(a_parts[0])
+        channels = int(a_parts[1])
+    except Exception:
+        sample_rate, channels = default["sample_rate"], default["channels"]
+
+    actual_ratio = w / h
+    aspect_ratio = min(VEO_SUPPORTED_RATIOS, key=lambda k: abs(VEO_SUPPORTED_RATIOS[k] - actual_ratio))
+    print(f"  📐 原始影片：{w}×{h} {fps}fps {sample_rate}Hz ch{channels}，Veo3 aspect_ratio = {aspect_ratio}")
+    return dict(aspect_ratio=aspect_ratio, width=w, height=h, fps=fps,
+                sample_rate=sample_rate, channels=channels)
+
+
+def normalize_to_source(src: Path, out: Path, src_info: dict) -> bool:
+    """
+    將 Veo3 輸出影片標準化成與來源影片相同的尺寸 / fps / 音訊格式。
+    若已一致則直接 copy，不重新編碼。
+    """
+    w, h      = src_info["width"], src_info["height"]
+    fps       = src_info["fps"]
+    sr        = src_info["sample_rate"]
+    ch        = src_info["channels"]
+
+    # 偵測 src 現有格式
+    probe = subprocess.run(
+        ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
+         "-show_entries", "stream=width,height,r_frame_rate",
+         "-of", "csv=p=0", str(src)],
+        capture_output=True, text=True,
+    )
+    try:
+        parts = probe.stdout.strip().split(",")
+        sv_w, sv_h = int(parts[0]), int(parts[1])
+        sv_num, sv_den = map(int, parts[2].split("/"))
+        sv_fps = round(sv_num / sv_den)
+    except Exception:
+        sv_w, sv_h, sv_fps = 0, 0, 0
+
+    already_ok = (sv_w == w and sv_h == h and sv_fps == fps)
+    if already_ok:
+        import shutil
+        shutil.copy2(src, out)
+        print(f"  ✅ 格式已一致（{w}×{h} {fps}fps），直接複製")
+        return True
+
+    print(f"  🔄 標準化：{sv_w}×{sv_h} {sv_fps}fps → {w}×{h} {fps}fps {sr}Hz ch{ch}")
+    cmd = [
+        "ffmpeg", "-y", "-i", str(src),
+        "-vf", f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
+               f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2",
+        "-r", str(fps),
+        "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+        "-c:a", "aac", "-ar", str(sr), "-ac", str(ch),
+        str(out),
+    ]
+    result = subprocess.run(cmd, capture_output=True)
+    if result.returncode == 0 and out.exists():
+        print(f"  ✅ 標準化完成 → {out.name}（{out.stat().st_size//1024} KB）")
+        return True
+    print(f"  ❌ 標準化失敗：{result.stderr.decode(errors='replace')[-300:]}")
+    return False
 
 
 # ── Step 1：列出 scene 截圖 ────────────────────────────────────────────────────
@@ -139,9 +253,9 @@ def gpt_vision_plan(
 
 
 # ── Step 3：Veo3 image-to-video ───────────────────────────────────────────────
-def _run_veo(client: genai.Client, model: str, prompt: str, image_obj) -> "operation":
+def _run_veo(client: genai.Client, model: str, prompt: str, image_obj, aspect_ratio: str) -> "operation":
     config = types.GenerateVideosConfig(
-        aspect_ratio="9:16",
+        aspect_ratio=aspect_ratio,
         number_of_videos=1,
     )
     try:
@@ -155,7 +269,7 @@ def _run_veo(client: genai.Client, model: str, prompt: str, image_obj) -> "opera
             op = client.models.generate_videos(model=model, prompt=prompt, config=config)
         elif "duration" in err or "invalid" in err:
             print(f"  ⚠️  自動加 duration_seconds=5…")
-            config2 = types.GenerateVideosConfig(aspect_ratio="9:16", duration_seconds=5, number_of_videos=1)
+            config2 = types.GenerateVideosConfig(aspect_ratio=aspect_ratio, duration_seconds=5, number_of_videos=1)
             op = client.models.generate_videos(model=model, prompt=prompt, image=image_obj, config=config2)
         else:
             raise
@@ -170,13 +284,13 @@ def _run_veo(client: genai.Client, model: str, prompt: str, image_obj) -> "opera
     return op
 
 
-def generate_veo3_video(client: genai.Client, prompt: str, ref_image: Path) -> Path | None:
+def generate_veo3_video(client: genai.Client, prompt: str, ref_image: Path, aspect_ratio: str) -> Path | None:
     image_obj = types.Image(image_bytes=ref_image.read_bytes(), mime_type="image/jpeg")
 
     for model in [VEO_MODEL, VEO_FALLBACK_MODEL]:
-        print(f"  🚀 送出生成請求（{model}）…")
+        print(f"  🚀 送出生成請求（{model}，aspect_ratio={aspect_ratio}）…")
         try:
-            op = _run_veo(client, model, prompt, image_obj)
+            op = _run_veo(client, model, prompt, image_obj, aspect_ratio)
         except Exception as e:
             print(f"  ❌ {model} 呼叫失敗：{e}")
             continue
@@ -412,9 +526,14 @@ def main():
     print(f"\n📝 Veo3 Prompt 預覽（前 180 字）：")
     print(f"   {veo_prompt[:180]}…")
 
+    # ── Step 1.5：偵測原始影片尺寸，決定 Veo3 aspect_ratio ──────────────────
+    print(f"\n📐 偵測原始影片尺寸…")
+    src_info     = detect_source_video_info()
+    aspect_ratio = src_info["aspect_ratio"]
+
     # ── Step 2：Veo3 image-to-video ──────────────────────────────────────────
-    print(f"\n🎬 Step 2 — {VEO_MODEL} image-to-video（以 {ref_image.name} 為起始）…")
-    raw_video = generate_veo3_video(veo_client, veo_prompt, ref_image)
+    print(f"\n🎬 Step 2 — {VEO_MODEL} image-to-video（以 {ref_image.name} 為起始，{aspect_ratio}）…")
+    raw_video = generate_veo3_video(veo_client, veo_prompt, ref_image, aspect_ratio)
     if not raw_video:
         print("錯誤：Veo3 未輸出影片")
         sys.exit(1)
@@ -454,12 +573,18 @@ def main():
         shutil.copy2(sped, final_path)
         print("  ⚠️  TTS 失敗，改用無聲版本")
 
-    # ── 複製到 clips/scene_00.mp4 ────────────────────────────────────────────
+    # ── 標準化並複製到 clips/scene_00.mp4 ───────────────────────────────────
     import shutil
     clips_dir = OUTPUT_DIR / "clips"
     clips_dir.mkdir(exist_ok=True)
     scene_00 = clips_dir / "scene_00.mp4"
-    shutil.copy2(final_path, scene_00)
+    print(f"\n🔧 Step 7 — 標準化輸出格式（對齊來源影片）…")
+    norm_path = OUTPUT_DIR / "veo3_hook_norm.mp4"
+    if normalize_to_source(final_path, norm_path, src_info):
+        shutil.copy2(norm_path, scene_00)
+    else:
+        shutil.copy2(final_path, scene_00)
+        print("  ⚠️  標準化失敗，使用原始輸出")
 
     # ── 完成 ──────────────────────────────────────────────────────────────────
     print(f"\n✅ 完成！")

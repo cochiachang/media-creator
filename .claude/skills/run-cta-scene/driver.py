@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-CTA 片尾靜態畫面生成器 v6
+CTA 片尾靜態畫面生成器 v8
 流程：
   1. 讀取 output/*_storyboard.json 的 cta_scene 區塊
   2. 用 ffmpeg 在 start_time 截取一張參考圖
-  3. 用 ffmpeg drawtext 在截圖上燒入 CTA 文字（白字黑邊）→ cta_scene.png
-  4. 用 OpenAI TTS（tts-1-hd, nova, 1.25x）生成 voiceover 旁白音訊
-  5. 用 ffmpeg 將 PNG + MP3 合成 5 秒 H.264 影片
+  3. 用 ffmpeg drawtext 燒入 text_overlay 文字（白字黑邊）→ cta_scene.png
+     ※ 畫面只顯示 text_overlay，不顯示 voiceover 文字
+  4. 用 OpenAI TTS（tts-1-hd, nova, 1.25x）唸 voiceover → cta_scene_tts.mp3
+  5. 用 ffmpeg 將 PNG + TTS MP3 合成 5 秒 H.264 影片
   6. 輸出 output/cta_scene.png + output/cta_scene_tts.mp3 + output/clips/cta_scene.mp4
 """
 import json
@@ -31,10 +32,11 @@ OUTPUT_PNG    = OUTPUT_DIR / "cta_scene.png"
 OUTPUT_TTS    = OUTPUT_DIR / "cta_scene_tts.mp3"
 OUTPUT_CLIP   = OUTPUT_DIR / "clips" / "cta_scene.mp4"
 
-TTS_MODEL     = "tts-1-hd"
-TTS_VOICE     = "nova"
-TTS_SPEED     = 1.25
-CLIP_DURATION = 5
+TTS_MODEL        = "gpt-4o-mini-tts"   # 支援 instructions，可指定台灣腔
+TTS_VOICE        = "nova"
+TTS_SPEED        = 1.5
+TTS_INSTRUCTIONS = "請用台灣腔繁體中文朗讀，語氣自然親切，像在對觀眾說話。"
+CLIP_DURATION    = 5
 
 # 字體候選（優先使用專案內建微軟正黑體，確保跨平台中文顯示）
 _BUNDLED_FONT = Path(__file__).resolve().parents[2] / "微軟正黑體.ttf"
@@ -136,14 +138,16 @@ def parse_cta_scene(storyboard: dict) -> dict:
         end_sec = start_sec + 5.0
 
     print(f"  📍 CTA 片段：{start_raw} → {end_raw}（{end_sec - start_sec:.1f} 秒）")
-    print(f"  📝 voiceover ：{cta.get('voiceover', '')}")
-    print(f"  📢 cta_action：{cta.get('cta_action', '')}")
+    print(f"  🔤 text_overlay：{cta.get('text_overlay', '')}")
+    print(f"  🎙️  voiceover   ：{cta.get('voiceover', '')}")
+    print(f"  📢 cta_action  ：{cta.get('cta_action', '')}")
 
     return {
-        "start_sec":  start_sec,
-        "end_sec":    end_sec,
-        "voiceover":  cta.get("voiceover", ""),
-        "cta_action": cta.get("cta_action", ""),
+        "start_sec":    start_sec,
+        "end_sec":      end_sec,
+        "text_overlay": cta.get("text_overlay", cta.get("cta_action", "")),
+        "voiceover":    cta.get("voiceover", ""),
+        "cta_action":   cta.get("cta_action", ""),
     }
 
 
@@ -167,65 +171,61 @@ def extract_start_frame(video_path: Path, start_sec: float) -> Path:
 
 
 # ── Step 4：ffmpeg drawtext 燒入文字 ─────────────────────────────────────────
+def get_frame_width(frame: Path) -> int:
+    """用 ffprobe 取得圖片寬度（px），失敗回傳 854。"""
+    result = subprocess.run(
+        ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
+         "-show_entries", "stream=width", "-of", "csv=p=0", str(frame)],
+        capture_output=True, text=True,
+    )
+    try:
+        return int(result.stdout.strip())
+    except ValueError:
+        return 854
+
+
 def burn_text_ffmpeg(frame: Path, cta: dict, out: Path) -> None:
     """
-    用 ffmpeg drawtext 在截圖上燒入兩層文字：
-    - 大字：cta_action，置中，畫面 ~65% 高處
-    - 小字：voiceover（自動分行），置中，畫面 ~78% 高處
-    白字 + 黑描邊（borderw）。
+    用 ffmpeg drawtext 在截圖上燒入 text_overlay（大字，置中）。
+    字型大小依最長行字數自動縮放，確保不超出畫面寬度。
+    不顯示 voiceover 文字。白字 + 黑描邊。
     """
     font     = find_font()
     font_opt = f"fontfile='{font}':" if font else ""
 
-    cta_action = cta.get("cta_action", "").strip()
-    voiceover  = cta.get("voiceover",  "").strip()
+    text_overlay = cta.get("text_overlay", "").strip()
 
     filters = []
 
-    # ── 大字：cta_action ───────────────────────────────────────────────────────
-    if cta_action:
-        # 大字每行最多 8 字
-        big_lines = wrap_lines(cta_action, max_chars=8)
-        big_size  = "w/7"       # ffmpeg 表達式：圖寬 / 7
-        line_h    = "w/7+12"    # 行距
-        n         = len(big_lines)
-        # 整體區塊頂部 y：h*0.65 - n*line_h/2
+    # ── 大字：text_overlay ────────────────────────────────────────────────────
+    if text_overlay:
+        # 每行最多 6 字，避免初始斷行過長
+        big_lines = wrap_lines(text_overlay, max_chars=6)
+        max_line_len = max(len(l) for l in big_lines)
+
+        # 動態計算字型大小：讓最長行佔畫面寬的 80%
+        # 中文字寬 ≈ font_size（方塊字），加上描邊 borderw=5 兩側共 10px
+        frame_w  = get_frame_width(frame)
+        max_fs   = frame_w // 7                            # 上限：舊行為
+        auto_fs  = int(frame_w * 0.80 / max(max_line_len, 1))
+        font_size = min(max_fs, auto_fs)
+        line_h   = font_size + 14
+
+        n = len(big_lines)
         for i, line in enumerate(big_lines):
             escaped = ffmpeg_escape(line)
-            # y 表達式：h*0.65 - (n/2 - i)*(fontsize+12)
-            y_expr = f"h*0.65 - ({n}/2.0 - {i})*({line_h})"
+            y_expr  = f"h*0.65 - ({n}/2.0 - {i})*{line_h}"
             filters.append(
                 f"drawtext={font_opt}"
                 f"text='{escaped}':"
-                f"fontsize={big_size}:"
+                f"fontsize={font_size}:"
                 f"fontcolor=white:"
                 f"borderw=5:"
                 f"bordercolor=black@0.9:"
                 f"x=(w-text_w)/2:"
                 f"y={y_expr}"
             )
-        print(f"  📝 大字：{'／'.join(big_lines)}")
-
-    # ── 小字：voiceover（多行）────────────────────────────────────────────────
-    if voiceover:
-        small_lines = wrap_lines(voiceover, max_chars=14)
-        small_size  = "w/18"
-        line_h_s    = "w/18+8"
-        n           = len(small_lines)
-        for i, line in enumerate(small_lines):
-            escaped = ffmpeg_escape(line)
-            y_expr  = f"h*0.80 + ({i})*({line_h_s})"
-            filters.append(
-                f"drawtext={font_opt}"
-                f"text='{escaped}':"
-                f"fontsize={small_size}:"
-                f"fontcolor=white@0.95:"
-                f"borderw=3:"
-                f"bordercolor=black@0.8:"
-                f"x=(w-text_w)/2:"
-                f"y={y_expr}"
-            )
-        print(f"  📝 小字：{small_lines}")
+        print(f"  📝 text_overlay：{'｜'.join(big_lines)}（{font_size}px, {frame_w}px寬）")
 
     if not filters:
         # 沒有文字，直接複製圖片
@@ -252,7 +252,7 @@ def burn_text_ffmpeg(frame: Path, cta: dict, out: Path) -> None:
         raise RuntimeError("ffmpeg drawtext 失敗")
 
 
-# ── Step 5：OpenAI TTS 生成旁白音訊 ──────────────────────────────────────────
+# ── Step 5：OpenAI TTS 生成旁白音訊（唸 voiceover，不顯示在畫面）────────────
 def generate_tts(client: OpenAI, voiceover: str, out: Path) -> bool:
     text = voiceover.strip()
     if not text:
@@ -260,12 +260,13 @@ def generate_tts(client: OpenAI, voiceover: str, out: Path) -> bool:
         return False
     if text[-1] not in "！!？?。.，,":
         text += "！"
-    print(f"  🎙️  TTS：『{text}』（{TTS_VOICE}, {TTS_SPEED}x）")
+    print(f"  🎙️  TTS：『{text}』（{TTS_MODEL}, {TTS_VOICE}, {TTS_SPEED}x, 台灣腔）")
     try:
         resp = client.audio.speech.create(
             model=TTS_MODEL,
             voice=TTS_VOICE,
             input=text,
+            instructions=TTS_INSTRUCTIONS,
             response_format="mp3",
             speed=TTS_SPEED,
         )
@@ -277,7 +278,7 @@ def generate_tts(client: OpenAI, voiceover: str, out: Path) -> bool:
         return False
 
 
-# ── Step 6：PNG + MP3 → 5 秒影片 ─────────────────────────────────────────────
+# ── Step 6：PNG + TTS MP3 → 5 秒影片 ────────────────────────────────────────
 def make_cta_clip(png: Path, mp3: Path | None, out: Path, duration: int = 5) -> bool:
     out.parent.mkdir(parents=True, exist_ok=True)
     if mp3 and mp3.exists():
@@ -293,15 +294,18 @@ def make_cta_clip(png: Path, mp3: Path | None, out: Path, duration: int = 5) -> 
         ]
         print(f"  🎬 ffmpeg：靜態圖 + TTS → {duration}s…")
     else:
+        # 加 anullsrc 靜音軌，確保 concat filter 能找到音訊流
         cmd = [
             "ffmpeg", "-y",
             "-loop", "1", "-framerate", "30", "-i", str(png),
+            "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
             "-c:v", "libx264", "-tune", "stillimage",
+            "-c:a", "aac", "-b:a", "128k",
             "-pix_fmt", "yuv420p",
-            "-t", str(duration), "-an",
+            "-t", str(duration), "-shortest",
             str(out),
         ]
-        print(f"  🎬 ffmpeg：靜態圖（無聲）→ {duration}s…")
+        print(f"  🎬 ffmpeg：靜態圖 + 靜音軌 → {duration}s…")
 
     result = subprocess.run(cmd, capture_output=True)
     if result.returncode == 0 and out.exists():
@@ -354,11 +358,11 @@ def main():
         import shutil
         shutil.copy2(ref, OUTPUT_PNG)
 
-    # Step 6
+    # Step 6 — TTS 唸 voiceover（不顯示在畫面，只作為音軌）
     print(f"\n🎙️  Step 6 — TTS 旁白（{TTS_VOICE}, {TTS_SPEED}x）…")
     tts_ok = generate_tts(client, cta["voiceover"], OUTPUT_TTS)
 
-    # Step 7
+    # Step 7 — 合成片尾影片
     print(f"\n🎞️  Step 7 — 合成 {CLIP_DURATION}s 片尾影片…")
     clip_ok = make_cta_clip(
         png=OUTPUT_PNG,
@@ -375,10 +379,12 @@ def main():
     if tts_ok:
         print(f"   CTA 旁白  ：output/cta_scene_tts.mp3（{OUTPUT_TTS.stat().st_size // 1024} KB）")
     if clip_ok:
-        print(f"   片尾影片  ：output/clips/cta_scene.mp4（{OUTPUT_CLIP.stat().st_size // 1024} KB，{CLIP_DURATION}s）")
+        clip_label = "含 TTS" if tts_ok else "靜音"
+        print(f"   片尾影片  ：output/clips/cta_scene.mp4（{OUTPUT_CLIP.stat().st_size // 1024} KB，{CLIP_DURATION}s，{clip_label}）")
     print(f"   參考截圖  ：output/cta_scene_frames/cta_ref.jpg")
     print(f"   CTA 行動  ：{cta['cta_action']}")
-    print(f"   旁白文字  ：{cta['voiceover']}")
+    print(f"   畫面文字  ：{cta['text_overlay']}")
+    print(f"   旁白音訊  ：{cta['voiceover']}")
     print(f"{'='*55}")
     print(f"\n💡 下一步：執行 /run-final-mixer 合併所有場景（含 clips/cta_scene.mp4）")
 
