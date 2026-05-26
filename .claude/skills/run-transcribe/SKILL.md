@@ -24,23 +24,34 @@ export OPENAI_API_KEY=<your-key>
 Place the source file in `upload/`, then:
 
 ```bash
-# audio file → output/test_speech.srt
-python3 .claude/skills/run-transcribe/driver.py test_speech.mp3
-
-# video file (audio is extracted automatically) → output/test_video.srt
+# 基本用法（會互動詢問影片背景）
 python3 .claude/skills/run-transcribe/driver.py test_video.mp4
 
-# custom output path
+# 指定背景資訊（跳過互動詢問）
+python3 .claude/skills/run-transcribe/driver.py test_video.mp4 --background "精品咖啡評審、COE 比賽"
+
+# 只跑 Whisper，跳過 GPT-4o 校正
+python3 .claude/skills/run-transcribe/driver.py test_video.mp4 --no-correct
+
+# 指定輸出路徑
 python3 .claude/skills/run-transcribe/driver.py test_speech.mp3 my_subtitles.srt
 ```
 
 The driver prints progress lines and the final path:
 
 ```
-Extracting audio from video: test_video.mp4
-Sending to Whisper API: test_video_audio.mp3
-SRT saved to: /…/output/test_video.srt
+從影片萃取音訊：test_video.mp4
+送交 Whisper API（language=zh）：test_video_audio.mp3
+使用 GPT-4o 校正同音字與斷句錯誤…
+✅ SRT 已儲存：/…/output/test_video.srt
 ```
+
+### 參數說明
+
+| 參數 | 說明 |
+|---|---|
+| `--background TEXT` | 影片背景資訊（主角、品牌、專有名詞），提升同音字辨識準確度 |
+| `--no-correct` | 跳過 GPT-4o 校正，只輸出 Whisper 原始結果 |
 
 ## SRT output format
 

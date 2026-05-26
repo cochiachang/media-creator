@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-最終混音器 - 讀取 output/clips/ 和 output/music/，
-用 ffmpeg 將 v1 音樂作為背景音疊入影片，保留原始聲音，輸出至 output/final/
+最終混音器 - 從 scene_00 開始，依數字順序合併 output/clips/ 所有影片，
+再搭配 output/music/ 的 v1 音樂混音，輸出至 output/final/
 """
 import re
 import subprocess
@@ -12,10 +12,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 CLIPS_DIR = PROJECT_ROOT / "output" / "clips"
 MUSIC_DIR = PROJECT_ROOT / "output" / "music"
 FINAL_DIR = PROJECT_ROOT / "output" / "final"
+CTA_CLIP  = CLIPS_DIR / "cta_scene.mp4"
 
-# 原始聲音音量（1.0 = 100%），背景音樂音量（0.1 = 10%）
+# 原始聲音音量（1.0 = 100%），背景音樂音量（0.2 = 20%）
 ORIGINAL_VOLUME = 1.5
-BGM_VOLUME = 0.1
+BGM_VOLUME = 0.2
+
+MERGED_NAME = "merged_scenes.mp4"
 
 
 def check_ffmpeg():
@@ -26,26 +29,52 @@ def check_ffmpeg():
         sys.exit(1)
 
 
-def list_clips():
+def list_scene_clips():
+    """收集 output/clips/scene_*.mp4，依數字從小到大排序（從 scene_00 開始）"""
     if not CLIPS_DIR.exists():
         return []
-    return sorted(CLIPS_DIR.glob("*.mp4"))
+    clips = []
+    for f in CLIPS_DIR.glob("scene_*.mp4"):
+        m = re.search(r"scene_(\d+)", f.stem)
+        if m:
+            clips.append((int(m.group(1)), f))
+    clips.sort(key=lambda x: x[0])
+    return [f for _, f in clips]
 
 
-def find_music_for_clip(clip_path):
-    """
-    從 clip 檔名取出 segment 編號，對應 segment_<n>_v1.mp3。
-    clip_01_00-00-02.mp4 → segment 1 → segment_1_v1.mp3
-    找不到對應時，回傳第一個可用的 v1.mp3。
-    """
-    m = re.search(r"clip_0*(\d+)", clip_path.stem)
-    if m:
-        n = int(m.group(1))
-        candidate = MUSIC_DIR / f"segment_{n}_v1.mp3"
-        if candidate.exists():
-            return candidate
+def concat_clips(clips, out_path):
+    """用 ffmpeg filter_complex concat 合併影片（重新編碼，正確處理時間戳）"""
+    inputs = []
+    for clip in clips:
+        inputs += ["-i", str(clip)]
 
-    # fallback：第一個 v1.mp3
+    n = len(clips)
+    # 每個輸入的 [v][a] 串接後送進 concat filter
+    stream_labels = "".join(f"[{i}:v][{i}:a]" for i in range(n))
+    filter_complex = f"{stream_labels}concat=n={n}:v=1:a=1[v][a]"
+
+    cmd = [
+        "ffmpeg", "-y",
+        *inputs,
+        "-filter_complex", filter_complex,
+        "-map", "[v]",
+        "-map", "[a]",
+        "-c:v", "libx264",
+        "-preset", "fast",
+        "-crf", "18",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        str(out_path),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr[-800:])
+
+
+def find_music():
+    """取得第一個 v1 音樂（依檔名排序）"""
+    if not MUSIC_DIR.exists():
+        return None
     v1_files = sorted(MUSIC_DIR.glob("*_v1.mp3"))
     return v1_files[0] if v1_files else None
 
@@ -72,43 +101,60 @@ def mix(clip_path, music_path, out_path):
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        raise RuntimeError(result.stderr[-500:])
+        raise RuntimeError(result.stderr[-800:])
 
 
 def main():
     check_ffmpeg()
 
-    clips = list_clips()
+    # ── Step 1：收集 scene 片段 ──────────────────────────────────────────
+    clips = list_scene_clips()
     if not clips:
-        print("output/clips/ 中沒有找到 .mp4 檔案")
-        print("請先執行 /run-clip-cutter 產生片段")
+        print("output/clips/ 中沒有找到 scene_*.mp4 檔案")
+        print("請先確認 output/clips/ 已有 scene_00.mp4、scene_01.mp4 等檔案")
         sys.exit(1)
 
-    v1_files = list(MUSIC_DIR.glob("*_v1.mp3")) if MUSIC_DIR.exists() else []
-    if not v1_files:
-        print("output/music/ 中沒有找到 *_v1.mp3 檔案")
-        print("請先執行 /run-music-generator 產生音樂")
-        sys.exit(1)
+    print(f"找到 {len(clips)} 個場景片段（從 scene_00 開始，依數字排序）：")
+    for c in clips:
+        print(f"  {c.name}")
+
+    # ── 自動附加 CTA 片尾 ────────────────────────────────────────────────
+    if CTA_CLIP.exists():
+        clips.append(CTA_CLIP)
+        print(f"  {CTA_CLIP.name}  ← CTA 片尾（自動附加）")
+    else:
+        print(f"  （未找到 {CTA_CLIP.name}，跳過 CTA 片尾）")
+    print()
 
     FINAL_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"找到 {len(clips)} 個片段，開始混音…\n")
+    merged_path = FINAL_DIR / MERGED_NAME
 
-    for clip in clips:
-        music = find_music_for_clip(clip)
-        if not music:
-            print(f"[{clip.name}]  ✗ 找不到對應音樂，跳過")
-            continue
+    # ── Step 2：合併所有片段（scene + CTA）──────────────────────────────
+    print(f"Step 1／2  合併 {len(clips)} 個片段 → {MERGED_NAME} …")
+    try:
+        concat_clips(clips, merged_path)
+        print(f"      ✓ 合併完成：output/final/{MERGED_NAME}\n")
+    except RuntimeError as e:
+        print(f"      ✗ 合併失敗：{e}")
+        sys.exit(1)
 
-        out_path = FINAL_DIR / clip.name
-        print(f"[{clip.name}]")
-        print(f"      + {music.name}  (BGM {int(BGM_VOLUME*100)}%)")
-        try:
-            mix(clip, music, out_path)
-            print(f"      ✓ 已儲存至 output/final/{clip.name}\n")
-        except RuntimeError as e:
-            print(f"      ✗ ffmpeg 失敗：{e}\n")
+    # ── Step 3：疊入 BGM ─────────────────────────────────────────────────
+    music = find_music()
+    if not music:
+        print("output/music/ 中沒有找到 *_v1.mp3，跳過混音步驟。")
+        print(f"最終影片（無 BGM）：output/final/{MERGED_NAME}")
+        return
 
-    print("完成！最終影片已儲存至：output/final/")
+    final_name = "merged_scenes_final.mp4"
+    final_path = FINAL_DIR / final_name
+
+    print(f"Step 2／2  混音：{MERGED_NAME} + {music.name}  (BGM {int(BGM_VOLUME * 100)}%)")
+    try:
+        mix(merged_path, music, final_path)
+        print(f"      ✓ 完成！最終影片：output/final/{final_name}")
+    except RuntimeError as e:
+        print(f"      ✗ 混音失敗：{e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

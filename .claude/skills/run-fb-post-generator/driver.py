@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Facebook 貼文生成器 - 根據 CSV 片段資訊，呼叫 OpenAI 生成 FB 貼文存成 TXT
+Facebook 貼文生成器 - 讀取 *_storyboard.json，呼叫 GPT-4o 生成一篇 FB 貼文存成 TXT
 """
-import csv
+import json
 import os
 import sys
 from pathlib import Path
@@ -14,8 +14,8 @@ except ImportError:
     sys.exit(1)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-OUTPUT_DIR = PROJECT_ROOT / "output"
-POSTS_DIR = OUTPUT_DIR / "posts"
+OUTPUT_DIR   = PROJECT_ROOT / "output"
+POSTS_DIR    = OUTPUT_DIR / "posts"
 
 SYSTEM_PROMPT = (
     "你是一個平常很愛在 Facebook 分享生活的台灣人，說話很自然隨性，"
@@ -24,15 +24,12 @@ SYSTEM_PROMPT = (
 )
 
 USER_PROMPT_TEMPLATE = """\
-根據以下影片片段的內容，用平常朋友聊天的方式寫一篇 Facebook 貼文：
+以下是一支短影音的完整分鏡腳本 JSON，請根據整體內容，寫一篇 Facebook 貼文：
 
-影片標題：{title}
-片段摘要：{summary}
-這段為什麼有趣：{viral_reason}
-關鍵字參考：{keywords}
+{storyboard_json}
 
 寫作原則：
-- 像在跟朋友分享，不要像在打廣告
+- 像在跟朋友分享整支影片的感受，不要像在打廣告
 - 不要說「你知道嗎」「你是否曾經」這種起頭
 - 不要有「按讚分享留言」這種 CTA
 - 不要用過多驚嘆號，也不要每句都加 emoji
@@ -42,46 +39,40 @@ USER_PROMPT_TEMPLATE = """\
 - 直接輸出貼文，不需要任何說明"""
 
 
-def generate_fb_post(client, segment):
+def generate_fb_post(client: OpenAI, storyboard: dict) -> str:
     prompt = USER_PROMPT_TEMPLATE.format(
-        title=segment.get("建議標題", ""),
-        summary=segment.get("片段內容摘要", ""),
-        viral_reason=segment.get("爆紅原因", ""),
-        keywords=segment.get("推薦關鍵字", ""),
+        storyboard_json=json.dumps(storyboard, ensure_ascii=False, indent=2)
     )
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": prompt},
+            {"role": "user",   "content": prompt},
         ],
         temperature=0.8,
     )
     return response.choices[0].message.content.strip()
 
 
-def list_csv_files():
-    return sorted(OUTPUT_DIR.glob("*_viral_segments.csv"))
-
-
-def select_csv(csv_files):
-    if not csv_files:
-        print("output/ 中沒有找到 *_viral_segments.csv 檔案")
-        print("請先執行 /run-viral-analyzer 產生分析結果")
+def select_storyboard() -> Path:
+    jsons = sorted(OUTPUT_DIR.glob("*_storyboard.json"))
+    if not jsons:
+        print("output/ 中沒有找到 *_storyboard.json 檔案")
+        print("請先執行 /run-viral-storyboard 產生分鏡腳本")
         sys.exit(1)
-    if len(csv_files) == 1:
-        print(f"使用分析檔案：{csv_files[0].name}")
-        return csv_files[0]
-    print("找到多個分析檔案：")
-    for i, f in enumerate(csv_files, 1):
+    if len(jsons) == 1:
+        print(f"使用分鏡腳本：{jsons[0].name}")
+        return jsons[0]
+    print("找到多個分鏡腳本：")
+    for i, f in enumerate(jsons, 1):
         print(f"  {i}. {f.name}")
     while True:
         try:
             choice = input("請選擇要處理的檔案（輸入編號）：").strip()
         except EOFError:
-            return csv_files[0]
-        if choice.isdigit() and 1 <= int(choice) <= len(csv_files):
-            return csv_files[int(choice) - 1]
+            return jsons[0]
+        if choice.isdigit() and 1 <= int(choice) <= len(jsons):
+            return jsons[int(choice) - 1]
         print("請輸入有效的編號")
 
 
@@ -93,38 +84,26 @@ def main():
 
     client = OpenAI(api_key=api_key)
 
-    csv_files = list_csv_files()
-    csv_file = select_csv(csv_files)
-
-    segments = []
-    with open(csv_file, encoding="utf-8-sig") as f:
-        for row in csv.DictReader(f):
-            segments.append(row)
+    sb_path    = select_storyboard()
+    storyboard = json.loads(sb_path.read_text(encoding="utf-8"))
 
     POSTS_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"\n開始生成 {len(segments)} 個 Facebook 貼文…\n")
+    stem     = sb_path.stem.replace("_storyboard", "")
+    out_path = POSTS_DIR / f"{stem}_fb_post.txt"
 
-    for seg in segments:
-        idx = seg.get("片段編號", "?")
-        title = seg.get("建議標題", "")
-        time_range = f"{seg.get('開始時間', '')} → {seg.get('結束時間', '')}"
-        print(f"[{idx}] {title[:30]}{'…' if len(title) > 30 else ''}")
+    print(f"\n🤖 呼叫 GPT-4o 生成 Facebook 貼文…")
+    try:
+        post = generate_fb_post(client, storyboard)
+    except Exception as e:
+        print(f"錯誤：生成失敗 — {e}")
+        sys.exit(1)
 
-        out_path = POSTS_DIR / f"segment_{idx}.txt"
-        try:
-            post = generate_fb_post(client, seg)
-            with open(out_path, "w", encoding="utf-8") as out:
-                out.write(f"片段 {idx}  {time_range}\n")
-                out.write(f"標題：{title}\n\n")
-                out.write(post)
-                out.write("\n")
-            print(f"      ✓ 已儲存至 output/posts/segment_{idx}.txt")
-        except Exception as e:
-            print(f"      ✗ 失敗：{e}")
-            with open(out_path, "w", encoding="utf-8") as out:
-                out.write(f"[生成失敗：{e}]\n")
+    out_path.write_text(post + "\n", encoding="utf-8")
 
-    print(f"\n完成！FB 貼文已儲存至：output/posts/")
+    print(f"\n✅ 貼文已儲存：output/posts/{out_path.name}")
+    print(f"\n{'─'*50}")
+    print(post)
+    print(f"{'─'*50}")
 
 
 if __name__ == "__main__":
