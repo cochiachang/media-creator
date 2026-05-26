@@ -1,3 +1,9 @@
 .claude/settings.local.json
 .env
 output/
+
+# 媒體產出（大型二進位檔，不進 git）
+output-*/
+upload/*.mp4
+upload/*.mov
+upload/concat_list.txt
