@@ -29,6 +29,15 @@ description: 一鍵執行完整短影音製作流水線：依序呼叫 run-trans
    mv output/ output-<stem>/ && mkdir output/
    ```
 
+5. 將 `output-<stem>/final/` 下所有檔案複製到 `results/`，然後 commit（**不要** commit `output-*/`）：
+   ```bash
+   mkdir -p results
+   cp output-<stem>/final/* results/
+   git add results/
+   git commit -m "results: add final output from <stem>"
+   git push
+   ```
+
 ## 錯誤處理
 
 - 轉錄、分析、剪輯失敗 → 停止並告知使用者
@@ -37,6 +46,7 @@ description: 一鍵執行完整短影音製作流水線：依序呼叫 run-trans
 
 ## 完成後告知使用者
 
-- 最終影片位置：`output-<stem>/final/`
+- 最終影片位置：`output-<stem>/final/`（本地封存）
+- 已複製至 Git 倉庫：`results/`（已 commit & push）
 - 貼文文字位置：`output-<stem>/posts/`
 - 整個流程花費時間
