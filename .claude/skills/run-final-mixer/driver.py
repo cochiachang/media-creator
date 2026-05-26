@@ -104,6 +104,50 @@ def mix(clip_path, music_path, out_path):
         raise RuntimeError(result.stderr[-800:])
 
 
+def embed_cover(video_path: Path) -> None:
+    """擷取第1秒的幀作為封面縮圖，嵌入 MP4 metadata，讓 Finder / 播放器顯示預覽畫面。"""
+    cover_path = video_path.with_suffix(".cover.jpg")
+    tmp_path   = video_path.with_suffix(".tmp.mp4")
+
+    # Step A：擷取第 1 秒幀
+    extract_cmd = [
+        "ffmpeg", "-y",
+        "-ss", "1",
+        "-i", str(video_path),
+        "-vframes", "1",
+        "-q:v", "2",
+        str(cover_path),
+    ]
+    r = subprocess.run(extract_cmd, capture_output=True, text=True)
+    if r.returncode != 0 or not cover_path.exists():
+        print("  （跳過封面嵌入：無法擷取第1秒幀）")
+        return
+
+    # Step B：重新封裝，嵌入封面
+    mux_cmd = [
+        "ffmpeg", "-y",
+        "-i", str(video_path),
+        "-i", str(cover_path),
+        "-map", "0",
+        "-map", "1",
+        "-c", "copy",
+        "-c:v:1", "mjpeg",
+        "-disposition:v:1", "attached_pic",
+        str(tmp_path),
+    ]
+    r = subprocess.run(mux_cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f"  （跳過封面嵌入：{r.stderr[-300:]}）")
+        cover_path.unlink(missing_ok=True)
+        return
+
+    # 替換原檔
+    video_path.unlink()
+    tmp_path.rename(video_path)
+    cover_path.unlink(missing_ok=True)
+    print("  ✓ 封面縮圖已嵌入（取第 1 秒幀）")
+
+
 def main():
     check_ffmpeg()
 
@@ -143,6 +187,8 @@ def main():
     if not music:
         print("output/music/ 中沒有找到 *_v1.mp3，跳過混音步驟。")
         print(f"最終影片（無 BGM）：output/final/{MERGED_NAME}")
+        print("嵌入封面縮圖 …")
+        embed_cover(merged_path)
         return
 
     final_name = "merged_scenes_final.mp4"
@@ -155,6 +201,10 @@ def main():
     except RuntimeError as e:
         print(f"      ✗ 混音失敗：{e}")
         sys.exit(1)
+
+    # ── Step 4：嵌入封面縮圖（取第 1 秒幀）────────────────────────────────
+    print("Step 3／3  嵌入封面縮圖 …")
+    embed_cover(final_path)
 
 
 if __name__ == "__main__":

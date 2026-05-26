@@ -49,12 +49,6 @@ python3 .claude/skills/run-transcribe/driver.py
 # 指定單一檔案（跳過自動選取 / 合併）
 python3 .claude/skills/run-transcribe/driver.py test_video.mp4
 
-# 指定背景資訊（跳過互動詢問）
-python3 .claude/skills/run-transcribe/driver.py test_video.mp4 --background "精品咖啡評審、COE 比賽"
-
-# 只跑 Whisper，跳過 GPT-4o 校正
-python3 .claude/skills/run-transcribe/driver.py test_video.mp4 --no-correct
-
 # 指定輸出路徑
 python3 .claude/skills/run-transcribe/driver.py test_speech.mp3 my_subtitles.srt
 ```
@@ -64,16 +58,10 @@ The driver prints progress lines and the final path:
 ```
 從影片萃取音訊：test_video.mp4
 送交 Whisper API（language=zh）：test_video_audio.mp3
-使用 GPT-4o 校正同音字與斷句錯誤…
 ✅ SRT 已儲存：/…/output/test_video.srt
 ```
 
-### 參數說明
-
-| 參數 | 說明 |
-|---|---|
-| `--background TEXT` | 影片背景資訊（主角、品牌、專有名詞），提升同音字辨識準確度 |
-| `--no-correct` | 跳過 GPT-4o 校正，只輸出 Whisper 原始結果 |
+> GPT-4o 校正與 Whisper prompt 已停用。直接輸出 Whisper 原始轉錄結果。
 
 ## SRT output format
 

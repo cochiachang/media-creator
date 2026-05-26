@@ -242,7 +242,6 @@ def transcribe(input_path: Path, output_srt: Path, background: str, do_correct: 
         if audio_path.stat().st_size > MAX_BYTES:
             sys.exit(f"檔案超過 {MAX_BYTES // 1024 // 1024} MB 限制，請先用 ffmpeg 切段。")
 
-        whisper_prompt = build_whisper_prompt(background)
         print(f"送交 Whisper API（language=zh）：{audio_path.name}")
         with open(audio_path, "rb") as f:
             srt_text = client.audio.transcriptions.create(
@@ -250,7 +249,6 @@ def transcribe(input_path: Path, output_srt: Path, background: str, do_correct: 
                 file=f,
                 response_format="srt",
                 language="zh",          # 明確指定繁體/簡體中文，跳過語言偵測
-                prompt=whisper_prompt,  # 注入 domain 詞彙，降低同音字誤轉
             )
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -329,13 +327,7 @@ def main():
     else:
         output_srt = OUTPUT_DIR / (input_path.stem + ".srt")
 
-    # Ask for background if not provided and correction is enabled
-    background = args.background
-    if not background and not args.no_correct:
-        print("\n💡 提供影片背景資訊可提升同音字辨識準確度（可直接按 Enter 跳過）")
-        background = input("影片背景（主角、主題、品牌、專有名詞等）：").strip()
-
-    transcribe(input_path, output_srt, background, do_correct=not args.no_correct)
+    transcribe(input_path, output_srt, background="", do_correct=False)
 
     # 轉錄成功後刪除原始分段檔案
     if originals_to_delete:
