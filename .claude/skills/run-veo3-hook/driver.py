@@ -42,7 +42,7 @@ PROJECT_ROOT       = Path(__file__).resolve().parents[3]
 OUTPUT_DIR         = PROJECT_ROOT / "output"
 UPLOAD_DIR         = PROJECT_ROOT / "upload"
 SHOTS_DIR          = OUTPUT_DIR / "storyboard_screenshots"
-VEO_MODEL          = "veo-3.0-generate-001"
+VEO_MODEL          = "veo-3.1-lite-generate-preview"
 VEO_FALLBACK_MODEL = "veo-3.0-fast-generate-001"
 GPT_MODEL          = "gpt-4o"
 POLL_INTERVAL      = 20
@@ -284,13 +284,32 @@ def _run_veo(client: genai.Client, model: str, prompt: str, image_obj, aspect_ra
     return op
 
 
+def _strip_audio_from_prompt(prompt: str) -> str:
+    """移除 prompt 中所有音訊/音效相關描述，避免觸發音訊安全過濾器。"""
+    import re
+    # 移除含音訊關鍵字的子句（逗號或句號分隔）
+    audio_keywords = r"(ambient|sound|audio|music|sting|acoustic|whisper|voice|dialogue|narrat|clinking|murmur|dramatic)"
+    # 先以逗號/分號拆句，過濾含音訊關鍵字的部分
+    parts = re.split(r"[,;]", prompt)
+    clean = [p for p in parts if not re.search(audio_keywords, p, re.IGNORECASE)]
+    result = ", ".join(p.strip() for p in clean if p.strip())
+    return result or prompt
+
+
 def generate_veo3_video(client: genai.Client, prompt: str, ref_image: Path, aspect_ratio: str) -> Path | None:
     image_obj = types.Image(image_bytes=ref_image.read_bytes(), mime_type="image/jpeg")
 
-    for model in [VEO_MODEL, VEO_FALLBACK_MODEL]:
-        print(f"  🚀 送出生成請求（{model}，aspect_ratio={aspect_ratio}）…")
+    # 嘗試順序：原始 prompt → 移除音訊後重試（同模型）→ fallback 模型
+    attempts = [
+        (VEO_MODEL, prompt, "原始 prompt"),
+        (VEO_MODEL, _strip_audio_from_prompt(prompt), "移除音訊描述後重試"),
+        (VEO_FALLBACK_MODEL, _strip_audio_from_prompt(prompt), "fallback 模型"),
+    ]
+
+    for model, cur_prompt, label in attempts:
+        print(f"  🚀 送出生成請求（{model}，{label}，aspect_ratio={aspect_ratio}）…")
         try:
-            op = _run_veo(client, model, prompt, image_obj, aspect_ratio)
+            op = _run_veo(client, model, cur_prompt, image_obj, aspect_ratio)
         except Exception as e:
             print(f"  ❌ {model} 呼叫失敗：{e}")
             continue
@@ -302,8 +321,6 @@ def generate_veo3_video(client: genai.Client, prompt: str, ref_image: Path, aspe
         if filtered and not vids:
             reasons = getattr(resp, "rai_media_filtered_reasons", [])
             print(f"  ⚠️  被安全過濾（{reasons}）")
-            if model != VEO_FALLBACK_MODEL:
-                print(f"  🔄 切換 fallback 模型…")
             continue
 
         if not vids:
