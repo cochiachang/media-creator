@@ -327,7 +327,7 @@ def main():
     else:
         output_srt = OUTPUT_DIR / (input_path.stem + ".srt")
 
-    transcribe(input_path, output_srt, background=args.background, do_correct=not args.no_correct)
+    transcribe(input_path, output_srt, background=args.background, do_correct=False)
 
     # 轉錄成功後刪除原始分段檔案
     if originals_to_delete:
