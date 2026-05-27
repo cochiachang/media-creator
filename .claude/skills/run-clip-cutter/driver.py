@@ -15,7 +15,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-FADE_DURATION = 0.2   # 末尾延長秒數 & 音量淡出時長
+FADE_DURATION = 0.5   # 末尾延長秒數 & 音量淡出時長
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SKILL_DIR = Path(__file__).resolve().parent
