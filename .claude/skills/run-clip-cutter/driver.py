@@ -26,9 +26,10 @@ CLIPS_DIR = OUTPUT_DIR / "clips"
 
 # ─── SRT 萃取與字幕燒錄 ──────────────────────────────────────────────────────
 
-def extract_segment_srt(full_srt_path: Path, start_s: float, end_s: float) -> str:
+def extract_segment_srt(full_srt_path: Path, start_s: float, end_s: float,
+                        fade_duration: float = FADE_DURATION) -> str:
     """
-    從完整 SRT 萃取 [start_s, end_s+0.5] 範圍內的字幕，時移為從 0 開始。
+    從完整 SRT 萃取 [start_s, end_s+fade_duration] 範圍內的字幕，時移為從 0 開始。
     回傳 SRT 格式字串；無字幕則回傳空字串。
     """
     import re as _re
@@ -68,11 +69,11 @@ def extract_segment_srt(full_srt_path: Path, start_s: float, end_s: float) -> st
         sub_s = _ts_to_s(m.group(1))
         sub_e = _ts_to_s(m.group(2))
 
-        if sub_e <= start_s or sub_s >= end_s + FADE_DURATION:
+        if sub_e <= start_s or sub_s >= end_s + fade_duration:
             continue
 
         new_s = max(0.0, sub_s - start_s)
-        new_e = min(end_s - start_s + FADE_DURATION, sub_e - start_s)
+        new_e = min(end_s - start_s + fade_duration, sub_e - start_s)
         text = "\n".join(lines[ts_idx + 1:]).strip()
         if not text:
             continue
@@ -163,38 +164,49 @@ def hms_to_s(hms):
 
 # ─── 剪輯片段 ─────────────────────────────────────────────────────────────────
 
-def cut_raw(source_video, start, end, has_audio, output_path):
-    """剪輯指定時間段（含降噪），末尾延長 FADE_DURATION 秒並做音量淡出。"""
+def cut_raw(source_video, start, end, has_audio, output_path,
+            fade_duration: float = FADE_DURATION):
+    """
+    剪輯指定時間段（含降噪）。
+    fade_duration > 0：末尾延長該秒數並做音量淡出。
+    fade_duration == 0：不延長、不淡出（下一段緊接時使用）。
+    """
     start = start.replace(",", ".")
     end = end.replace(",", ".")
     raw_s = hms_to_s(end) - hms_to_s(start)
-    total_s = raw_s + FADE_DURATION
-    fade_st = total_s - FADE_DURATION
+    total_s = raw_s + fade_duration
     dur_str = f"{total_s:.3f}"
-    fd = f"{FADE_DURATION:.3f}"
 
     if has_audio:
+        if fade_duration > 0:
+            fade_st = total_s - fade_duration
+            af = (f"afftdn=nf=-25:tn=1,"
+                  f"afade=t=out:st={fade_st:.3f}:d={fade_duration:.3f}")
+        else:
+            af = "afftdn=nf=-25:tn=1"
         cmd = [
             "ffmpeg", "-y",
             "-ss", start, "-i", str(source_video),
             "-t", dur_str,
             "-c:v", "libx264", "-preset", "fast",
-            "-af", f"afftdn=nf=-25:tn=1,afade=t=out:st={fade_st:.3f}:d={fd}",
+            "-af", af,
             "-c:a", "aac",
             str(output_path),
         ]
     else:
-        cmd = [
+        base_cmd = [
             "ffmpeg", "-y",
             "-ss", start, "-i", str(source_video),
             "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
             "-t", dur_str,
             "-map", "0:v", "-map", "1:a",
             "-c:v", "libx264", "-preset", "fast",
-            "-af", f"afade=t=out:st={fade_st:.3f}:d={fd}",
-            "-c:a", "aac",
-            str(output_path),
         ]
+        if fade_duration > 0:
+            fade_st = total_s - fade_duration
+            base_cmd += ["-af", f"afade=t=out:st={fade_st:.3f}:d={fade_duration:.3f}"]
+        base_cmd += ["-c:a", "aac", str(output_path)]
+        cmd = base_cmd
 
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
@@ -223,7 +235,8 @@ def make_static_srt(text: str, duration_s: float) -> str:
 # ─── 單一片段完整流程 ─────────────────────────────────────────────────────────
 
 def process_segment(source_video, srt_path, start, end, idx, has_audio, prefix="scene",
-                    static_subtitle: str | None = None):
+                    static_subtitle: str | None = None,
+                    fade_duration: float = FADE_DURATION):
     CLIPS_DIR.mkdir(exist_ok=True)
     output_path = CLIPS_DIR / f"{prefix}_{idx:02d}.mp4"
 
@@ -237,21 +250,24 @@ def process_segment(source_video, srt_path, start, end, idx, has_audio, prefix="
         seg_srt_path = None
         start_s = hms_to_s(start.replace(",", "."))
         end_s = hms_to_s(end.replace(",", "."))
-        duration_s = end_s - start_s + FADE_DURATION
+        duration_s = end_s - start_s + fade_duration
 
         if static_subtitle and static_subtitle.strip():
             srt_content = make_static_srt(static_subtitle.strip(), duration_s)
             seg_srt_path = tmp / "segment.srt"
             seg_srt_path.write_text(srt_content, encoding="utf-8")
         elif srt_path and srt_path.exists():
-            srt_content = extract_segment_srt(srt_path, start_s, end_s)
+            srt_content = extract_segment_srt(srt_path, start_s, end_s,
+                                               fade_duration=fade_duration)
             if srt_content.strip():
                 seg_srt_path = tmp / "segment.srt"
                 seg_srt_path.write_text(srt_content, encoding="utf-8")
 
         has_sub = seg_srt_path is not None
-        print(f"      → 剪輯片段（降噪{'＋字幕' if has_sub else ''}）…")
-        if not cut_raw(source_video, start, end, has_audio, raw_path):
+        fade_info = f"淡出 {fade_duration}s" if fade_duration > 0 else "無淡出"
+        print(f"      → 剪輯片段（降噪{'＋字幕' if has_sub else ''}，{fade_info}）…")
+        if not cut_raw(source_video, start, end, has_audio, raw_path,
+                       fade_duration=fade_duration):
             return None
 
         # ② 字幕燒錄或直接輸出
@@ -420,19 +436,29 @@ def main():
     print(f"開始剪輯 {len(segments)} 個片段，儲存至 output/clips/\n")
 
     success = []
-    for seg in segments:
+    for i, seg in enumerate(segments):
         idx   = seg["idx"]
         start = seg["start"]
         end   = seg["end"]
         title = seg["title"]
         label = f"[{seg['label']}] " if seg.get("label") else ""
         trans = seg.get("transition_out", "cut")
+
+        # ── 若下一段的開始時間 == 本段結束時間，則 fade_duration = 0 ──────────
+        if i + 1 < len(segments):
+            cur_end_s  = hms_to_s(end.replace(",", "."))
+            next_start_s = hms_to_s(segments[i + 1]["start"].replace(",", "."))
+            fade_dur = 0.0 if abs(next_start_s - cur_end_s) < 0.05 else FADE_DURATION
+        else:
+            fade_dur = FADE_DURATION
+
         print(f"[{idx:02d}] {label}{start} → {end}  {title[:20]}{'…' if len(title) > 20 else ''}  (→{trans})")
         voiceover = seg.get("voiceover", "") if use_storyboard else None
         out = process_segment(
             source_video, srt_path, start, end,
             idx, has_audio, prefix=prefix,
             static_subtitle=voiceover,
+            fade_duration=fade_dur,
         )
         if out:
             success.append(out)
