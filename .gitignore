@@ -3,3 +3,4 @@
 output/
 output-*/
 upload/coffee_penny_merged.mp4
+__pycache__/
